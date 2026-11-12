@@ -9,10 +9,13 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSaveFile>
+#include <QSettings>
 #include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -59,6 +62,10 @@ CProjectDocument::CProjectDocument(QObject* parent)
    play_timer_.setInterval(static_cast<int>(kTickMs));
    connect(&play_timer_, &QTimer::timeout, this,
            &CProjectDocument::tick_play);
+   recovery_timer_.setSingleShot(true);
+   recovery_timer_.setInterval(1000);
+   connect(&recovery_timer_, &QTimer::timeout, this,
+           &CProjectDocument::write_recovery);
 }
 
 void CProjectDocument::set_store(CLibraryStore* store) {
@@ -125,27 +132,45 @@ int CProjectDocument::count_track(const QString& track) const {
    return count;
 }
 
-bool CProjectDocument::open_short(const QString& short_id) {
+bool CProjectDocument::open_short(const QString& short_id,
+                                  const QString& recovery) {
    pause();
    if (store_ == nullptr || store_->short_name(short_id).isEmpty()) {
       close();
       return false;
    }
+   if (!short_id_.isEmpty() && short_id_ != short_id) {
+      clear_recovery();
+   }
    short_id_ = short_id;
    selected_clip_id_.clear();
    playhead_ms_ = 0;
    undo_.clear();
-   load_json();
+   const QString recovery_file = recovery_path();
+   const bool has_journal = QFileInfo::exists(recovery_file);
+   suppress_recovery_ = true;
+   if (has_journal && recovery == QLatin1String("restore")) {
+      from_json(read_json_file(recovery_file));
+   } else {
+      if (has_journal && recovery == QLatin1String("discard")) {
+         QFile::remove(recovery_file);
+      }
+      load_json();
+   }
+   suppress_recovery_ = false;
    emit short_changed();
    emit timeline_changed();
    emit playhead_changed();
    emit selection_changed();
+   emit recovery_changed();
    return true;
 }
 
 void CProjectDocument::close() {
    pause();
+   recovery_timer_.stop();
    const bool had = !short_id_.isEmpty() || !clips_.empty();
+   clear_recovery();
    short_id_.clear();
    clips_.clear();
    undo_.clear();
@@ -156,76 +181,51 @@ void CProjectDocument::close() {
       emit timeline_changed();
       emit playhead_changed();
       emit selection_changed();
+      emit recovery_changed();
    }
 }
 
-QString CProjectDocument::import_video(const QString& folder_id,
+QString CProjectDocument::import_media(const QString& bin_id,
                                        const QString& path) {
    if (store_ == nullptr) {
       return {};
    }
-   const QString file = local_path(path);
-   if (file.isEmpty() || !QFileInfo::exists(file)) {
-      return {};
-   }
-   const QString name = base_name(file);
-   const QString id = store_->create_short(folder_id, name);
-   if (id.isEmpty()) {
-      return {};
-   }
-   if (!attach_media(id, file, true)) {
-      store_->delete_short(id, true);
-      return {};
-   }
-   open_short(id);
-   return id;
+   return store_->import_media(bin_id, path);
+}
+
+QString CProjectDocument::import_video(const QString& folder_id,
+                                       const QString& path) {
+   Q_UNUSED(folder_id)
+   return import_media({}, path);
 }
 
 bool CProjectDocument::import_into_short(const QString& short_id,
                                          const QString& path) {
-   const QString file = local_path(path);
-   if (file.isEmpty() || !QFileInfo::exists(file)) {
+   if (store_ == nullptr) {
       return false;
    }
-   if (!attach_media(short_id, file, true)) {
+   const QString asset = import_media({}, path);
+   if (asset.isEmpty()) {
       return false;
    }
-   if (short_id_ == short_id) {
-      load_json();
-      emit timeline_changed();
+   if (short_id_ != short_id) {
+      if (!open_short(short_id)) {
+         return false;
+      }
    }
-   return true;
+   return !place_asset(asset, {}, 0, false).isEmpty();
 }
 
 QString CProjectDocument::add_audio(const QString& path) {
    if (store_ == nullptr || short_id_.isEmpty()) {
       return {};
    }
-   const QString file = local_path(path);
-   const MediaInfo info = CMediaIo::probe(file);
-   if (info.duration_ms <= 0) {
+   const QString asset = import_media({}, path);
+   if (asset.isEmpty()) {
       return {};
    }
-   const QString asset =
-       QUuid::createUuid().toString(QUuid::WithoutBraces);
-   const QString relative =
-       CMediaIo::copy_asset(store_->root_path(), file, asset);
-   if (relative.isEmpty()) {
-      return {};
-   }
-   push_undo();
-   TimelineClip clip;
-   clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-   clip.track = QStringLiteral("a1");
-   clip.kind = QStringLiteral("audio");
-   clip.asset_id = asset;
-   clip.file = relative;
-   clip.out_ms = info.duration_ms;
-   clips_.push_back(clip);
-   write_waveform(asset, QDir(store_->root_path()).filePath(relative));
-   save();
-   emit timeline_changed();
-   return clip.id;
+   return place_asset(asset, QStringLiteral("a1"), playhead_ms_,
+                      false);
 }
 
 QString CProjectDocument::add_text(const QString& text) {
@@ -408,11 +408,15 @@ bool CProjectDocument::save() {
    }
    const QString path = project_path();
    QDir().mkpath(QFileInfo(path).absolutePath());
-   QFile file(path);
-   if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+   QSaveFile file(path);
+   if (!file.open(QIODevice::WriteOnly)) {
       return false;
    }
    file.write(QJsonDocument(to_json()).toJson());
+   if (!file.commit()) {
+      return false;
+   }
+   schedule_recovery();
    return true;
 }
 
@@ -466,6 +470,11 @@ double CProjectDocument::clip_offset_y(const QString& clip_id) const {
 QString CProjectDocument::clip_text(const QString& clip_id) const {
    const TimelineClip* clip = clip_by_id(clip_id);
    return clip == nullptr ? QString() : clip->text;
+}
+
+QString CProjectDocument::clip_asset_id(const QString& clip_id) const {
+   const TimelineClip* clip = clip_by_id(clip_id);
+   return clip == nullptr ? QString() : clip->asset_id;
 }
 
 QString CProjectDocument::first_clip_on(const QString& track) const {
@@ -688,6 +697,288 @@ void CProjectDocument::write_waveform(const QString& asset_id,
       values.append(peak);
    }
    out.write(QJsonDocument(values).toJson(QJsonDocument::Compact));
+}
+
+QString CProjectDocument::place_asset(const QString& asset_id,
+                                      const QString& track,
+                                      qint64 start_ms, bool insert) {
+   if (store_ == nullptr || short_id_.isEmpty()) {
+      return {};
+   }
+   const LibraryAsset asset = store_->asset_by_id(asset_id);
+   if (asset.id.isEmpty() || asset.relpath.isEmpty()) {
+      return {};
+   }
+   QString dest = track;
+   if (dest.isEmpty()) {
+      dest = default_track(asset.kind);
+   }
+   qint64 in_ms = asset.in_ms;
+   qint64 out_ms = asset.out_ms;
+   if (out_ms <= in_ms) {
+      in_ms = 0;
+      out_ms = asset.duration_ms;
+   }
+   const qint64 length = out_ms - in_ms;
+   if (length <= 0) {
+      return {};
+   }
+   const qint64 start = std::max<qint64>(start_ms, 0);
+   push_undo();
+   if (insert) {
+      for (TimelineClip& clip : clips_) {
+         if (clip.track == dest && clip.start_ms >= start) {
+            clip.start_ms += length;
+         }
+      }
+   } else {
+      overwrite_range(dest, start, start + length);
+   }
+
+   TimelineClip clip;
+   clip.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+   clip.track = dest;
+   clip.kind = asset.kind;
+   clip.asset_id = asset.id;
+   clip.file = asset.relpath;
+   clip.in_ms = in_ms;
+   clip.out_ms = out_ms;
+   clip.start_ms = start;
+   clips_.push_back(clip);
+
+   const QString abs =
+       QDir(store_->root_path()).filePath(asset.relpath);
+   if (asset.kind == QLatin1String("video") &&
+       dest == QLatin1String("v1")) {
+      const QString poster = write_poster(short_id_, abs);
+      store_->update_short_media(short_id_,
+                                 std::max(duration_ms(), length),
+                                 poster);
+      const MediaInfo info = CMediaIo::probe(abs);
+      if (info.has_audio) {
+         const QString audio_track = QStringLiteral("a1");
+         if (insert) {
+            for (TimelineClip& item : clips_) {
+               if (item.track == audio_track &&
+                   item.start_ms >= start) {
+                  item.start_ms += length;
+               }
+            }
+         } else {
+            overwrite_range(audio_track, start, start + length);
+         }
+         TimelineClip audio = clip;
+         audio.id =
+             QUuid::createUuid().toString(QUuid::WithoutBraces);
+         audio.track = audio_track;
+         audio.kind = QStringLiteral("audio");
+         clips_.push_back(audio);
+         write_waveform(asset.id, abs);
+      }
+   }
+   if (asset.kind == QLatin1String("audio") ||
+       dest == QLatin1String("a1")) {
+      write_waveform(asset.id, abs);
+   }
+   save();
+   emit timeline_changed();
+   return clip.id;
+}
+
+bool CProjectDocument::close_gap() {
+   QString track = QStringLiteral("v1");
+   const TimelineClip* selected = clip_by_id(selected_clip_id_);
+   if (selected != nullptr) {
+      track = selected->track;
+   }
+   std::vector<TimelineClip*> ordered;
+   for (TimelineClip& clip : clips_) {
+      if (clip.track == track) {
+         ordered.push_back(&clip);
+      }
+   }
+   std::sort(ordered.begin(), ordered.end(),
+             [](const TimelineClip* left, const TimelineClip* right) {
+                return left->start_ms < right->start_ms;
+             });
+   qint64 gap = 0;
+   int gap_index = -1;
+   for (int i = 0; i + 1 < static_cast<int>(ordered.size()); ++i) {
+      const qint64 end =
+          ordered[static_cast<std::size_t>(i)]->start_ms +
+          (ordered[static_cast<std::size_t>(i)]->out_ms -
+           ordered[static_cast<std::size_t>(i)]->in_ms);
+      const qint64 next =
+          ordered[static_cast<std::size_t>(i + 1)]->start_ms;
+      if (next > end) {
+         gap = next - end;
+         gap_index = i + 1;
+         break;
+      }
+   }
+   if (gap <= 0 || gap_index < 0) {
+      return false;
+   }
+   push_undo();
+   for (int i = gap_index; i < static_cast<int>(ordered.size());
+        ++i) {
+      ordered[static_cast<std::size_t>(i)]->start_ms -= gap;
+   }
+   save();
+   emit timeline_changed();
+   return true;
+}
+
+qint64 CProjectDocument::snap_ms(qint64 time_ms,
+                                 double ms_per_pixel) const {
+   QSettings settings;
+   const bool enabled =
+       settings.value(QStringLiteral("layout/snapEnabled"), true)
+           .toBool();
+   if (!enabled || ms_per_pixel <= 0) {
+      return time_ms;
+   }
+   const qint64 threshold =
+       std::max<qint64>(1, static_cast<qint64>(
+                               std::llround(8.0 * ms_per_pixel)));
+   qint64 best = time_ms;
+   qint64 best_delta = threshold + 1;
+   auto consider = [&](qint64 candidate) {
+      const qint64 delta = candidate > time_ms ? candidate - time_ms
+                                               : time_ms - candidate;
+      if (delta <= threshold && delta < best_delta) {
+         best = candidate;
+         best_delta = delta;
+      }
+   };
+   consider(playhead_ms_);
+   for (const TimelineClip& clip : clips_) {
+      consider(clip.start_ms);
+      consider(clip.start_ms + (clip.out_ms - clip.in_ms));
+   }
+   return best;
+}
+
+bool CProjectDocument::move_clip(const QString& clip_id,
+                                 qint64 start_ms) {
+   TimelineClip* clip = mutable_clip(clip_id);
+   if (clip == nullptr) {
+      return false;
+   }
+   const qint64 start = std::max<qint64>(start_ms, 0);
+   if (clip->start_ms == start) {
+      return true;
+   }
+   push_undo();
+   clip->start_ms = start;
+   save();
+   emit timeline_changed();
+   return true;
+}
+
+void CProjectDocument::flush_recovery() {
+   recovery_timer_.stop();
+   write_recovery();
+}
+
+bool CProjectDocument::has_recovery() const {
+   return QFileInfo::exists(recovery_path());
+}
+
+void CProjectDocument::overwrite_range(const QString& track,
+                                       qint64 start_ms,
+                                       qint64 end_ms) {
+   std::vector<TimelineClip> kept;
+   kept.reserve(clips_.size());
+   for (const TimelineClip& clip : clips_) {
+      if (clip.track != track) {
+         kept.push_back(clip);
+         continue;
+      }
+      const qint64 cstart = clip.start_ms;
+      const qint64 clen = clip.out_ms - clip.in_ms;
+      const qint64 cend = cstart + clen;
+      if (cend <= start_ms || cstart >= end_ms) {
+         kept.push_back(clip);
+         continue;
+      }
+      if (cstart < start_ms) {
+         TimelineClip left = clip;
+         left.out_ms = left.in_ms + (start_ms - cstart);
+         kept.push_back(left);
+      }
+      if (cend > end_ms) {
+         TimelineClip right = clip;
+         right.id =
+             QUuid::createUuid().toString(QUuid::WithoutBraces);
+         right.in_ms = clip.in_ms + (end_ms - cstart);
+         right.start_ms = end_ms;
+         kept.push_back(right);
+      }
+   }
+   clips_ = std::move(kept);
+}
+
+QString CProjectDocument::default_track(const QString& kind) const {
+   if (kind == QLatin1String("audio")) {
+      return QStringLiteral("a1");
+   }
+   if (kind == QLatin1String("image")) {
+      return QStringLiteral("v2");
+   }
+   return QStringLiteral("v1");
+}
+
+QString CProjectDocument::recovery_path() const {
+   if (store_ == nullptr || short_id_.isEmpty()) {
+      return {};
+   }
+   return QDir(store_->root_path())
+       .filePath("shorts/" + short_id_ + "/recovery.json");
+}
+
+void CProjectDocument::schedule_recovery() {
+   if (suppress_recovery_ || short_id_.isEmpty()) {
+      return;
+   }
+   recovery_timer_.start();
+}
+
+void CProjectDocument::write_recovery() {
+   if (suppress_recovery_ || store_ == nullptr ||
+       short_id_.isEmpty()) {
+      return;
+   }
+   const QString path = recovery_path();
+   if (path.isEmpty()) {
+      return;
+   }
+   QDir().mkpath(QFileInfo(path).absolutePath());
+   QSaveFile file(path);
+   if (!file.open(QIODevice::WriteOnly)) {
+      return;
+   }
+   file.write(QJsonDocument(to_json()).toJson());
+   if (file.commit()) {
+      emit recovery_changed();
+   }
+}
+
+void CProjectDocument::clear_recovery() {
+   recovery_timer_.stop();
+   const QString path = recovery_path();
+   if (!path.isEmpty() && QFile::remove(path)) {
+      emit recovery_changed();
+   }
+}
+
+QJsonObject CProjectDocument::read_json_file(
+    const QString& path) const {
+   QFile file(path);
+   if (!file.open(QIODevice::ReadOnly)) {
+      return {};
+   }
+   return QJsonDocument::fromJson(file.readAll()).object();
 }
 
 void CProjectDocument::tick_play() {

@@ -29,6 +29,31 @@ struct LibraryShort {
 };
 
 /**
+ * @brief Бин пула ассетов.
+ */
+struct LibraryBin {
+   QString id;
+   QString parent_id;
+   QString name;
+};
+
+/**
+ * @brief Ассет пула.
+ */
+struct LibraryAsset {
+   QString id;
+   QString bin_id;
+   QString name;
+   QString kind;
+   QString relpath;
+   qint64 duration_ms = 0;
+   qint64 in_ms = 0;
+   qint64 out_ms = 0;
+   QString fingerprint;
+   qint64 size = 0;
+};
+
+/**
  * @brief Папки и ролики в library.db выбранной папки.
  */
 class CLibraryStore : public QObject {
@@ -36,6 +61,8 @@ class CLibraryStore : public QObject {
    QML_ELEMENT
    Q_PROPERTY(bool opened READ is_opened NOTIFY open_changed)
    Q_PROPERTY(QString rootPath READ root_path NOTIFY open_changed)
+   Q_PROPERTY(QString rootBinId READ root_bin_id NOTIFY open_changed)
+   Q_PROPERTY(QString lastError READ last_error NOTIFY library_changed)
 
  public:
    /**
@@ -242,6 +269,24 @@ class CLibraryStore : public QObject {
     * @param path - файл.
     * @return id ролика или пусто.
     */
+   /**
+    * @brief Импортирует файл в бин пула.
+    * @param bin_id - бин или пусто для корня.
+    * @param path - файл.
+    * @return id ассета или пусто.
+    */
+   Q_INVOKABLE QString import_media(const QString& bin_id,
+                                    const QString& path);
+
+   /**
+    * @brief Импортирует папку как бины и ассеты.
+    * @param bin_id - родительский бин или пусто для корня.
+    * @param path - папка на диске.
+    * @return id созданного бина или пусто.
+    */
+   Q_INVOKABLE QString import_folder(const QString& bin_id,
+                                     const QString& path);
+
    Q_INVOKABLE QString import_video(const QString& folder_id,
                                     const QString& path);
 
@@ -306,6 +351,211 @@ class CLibraryStore : public QObject {
     */
    std::vector<LibraryShort> shorts() const;
 
+   /**
+    * @brief Возвращает id корневого бина.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString root_bin_id() const;
+
+   /**
+    * @brief Последняя ошибка пула.
+    * @return busy или пусто.
+    */
+   QString last_error() const { return last_error_; }
+
+   /**
+    * @brief Создаёт бин.
+    * @param parent_id - родитель или пусто для корня.
+    * @param name - имя.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString create_bin(const QString& parent_id,
+                                  const QString& name);
+
+   /**
+    * @brief Имя бина.
+    * @param id - бин.
+    * @return имя или пусто.
+    */
+   Q_INVOKABLE QString bin_name(const QString& id) const;
+
+   /**
+    * @brief Родитель бина.
+    * @param id - бин.
+    * @return id родителя или пусто.
+    */
+   Q_INVOKABLE QString bin_parent(const QString& id) const;
+
+   /**
+    * @brief Переименовывает бин.
+    * @param id - бин.
+    * @param name - новое имя.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool rename_bin(const QString& id, const QString& name);
+
+   /**
+    * @brief Переносит бин.
+    * @param id - бин.
+    * @param parent_id - новый родитель или корень.
+    * @return true, если родитель изменён или уже такой.
+    */
+   Q_INVOKABLE bool reparent_bin(const QString& id,
+                                 const QString& parent_id);
+
+   /**
+    * @brief Удаляет пустой бин.
+    * @param id - бин.
+    * @return true, если удалён.
+    */
+   Q_INVOKABLE bool delete_bin(const QString& id);
+
+   /**
+    * @brief Имя ассета.
+    * @param id - ассет.
+    * @return имя или пусто.
+    */
+   Q_INVOKABLE QString asset_name(const QString& id) const;
+
+   /**
+    * @brief Тип ассета.
+    * @param id - ассет.
+    * @return video, audio, image или пусто.
+    */
+   Q_INVOKABLE QString asset_kind(const QString& id) const;
+
+   /**
+    * @brief Бин ассета.
+    * @param id - ассет.
+    * @return id бина.
+    */
+   Q_INVOKABLE QString asset_bin(const QString& id) const;
+
+   /**
+    * @brief Относительный путь копии.
+    * @param id - ассет.
+    * @return путь внутри библиотеки.
+    */
+   Q_INVOKABLE QString asset_relpath(const QString& id) const;
+
+   /**
+    * @brief Абсолютный путь копии ассета.
+    * @param id - ассет.
+    * @return путь или пусто.
+    */
+   Q_INVOKABLE QString asset_abs_path(const QString& id) const;
+
+   /**
+    * @brief Длительность ассета.
+    * @param id - ассет.
+    * @return миллисекунды.
+    */
+   Q_INVOKABLE qint64 asset_duration_ms(const QString& id) const;
+
+   /**
+    * @brief Вход ассета.
+    * @param id - ассет.
+    * @return миллисекунды.
+    */
+   Q_INVOKABLE qint64 asset_in_ms(const QString& id) const;
+
+   /**
+    * @brief Выход ассета.
+    * @param id - ассет.
+    * @return миллисекунды.
+    */
+   Q_INVOKABLE qint64 asset_out_ms(const QString& id) const;
+
+   /**
+    * @brief Задаёт вход и выход ассета.
+    * @param id - ассет.
+    * @param in_ms - вход.
+    * @param out_ms - выход.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool set_asset_marks(const QString& id, qint64 in_ms,
+                                    qint64 out_ms);
+
+   /**
+    * @brief Переносит ассет в другой бин.
+    * @param id - ассет.
+    * @param bin_id - бин.
+    * @return true, если бин изменён.
+    */
+   Q_INVOKABLE bool move_asset(const QString& id, const QString& bin_id);
+
+   /**
+    * @brief Удаляет ассет после подтверждения.
+    * @param id - ассет.
+    * @param confirmed - подтверждение.
+    * @return true, если удалён.
+    */
+   Q_INVOKABLE bool delete_asset(const QString& id, bool confirmed);
+
+   /**
+    * @brief Сообщает, что ассет стоит на таймлайне.
+    * @param id - ассет.
+    * @return true, если есть клип с этим asset_id.
+    */
+   Q_INVOKABLE bool asset_is_busy(const QString& id) const;
+
+   /**
+    * @brief Число ассетов.
+    * @return строки assets.
+    */
+   Q_INVOKABLE int asset_count() const;
+
+   /**
+    * @brief Число файлов в media/.
+    * @return файлы, не каталоги.
+    */
+   Q_INVOKABLE int media_file_count() const;
+
+   /**
+    * @brief Число роликов.
+    * @return строки shorts.
+    */
+   Q_INVOKABLE int short_count() const;
+
+   /**
+    * @brief Число бинов.
+    * @return строки bins.
+    */
+   Q_INVOKABLE int bin_count() const;
+
+   /**
+    * @brief Все бины.
+    * @return записи bins.
+    */
+   std::vector<LibraryBin> bins() const;
+
+   /**
+    * @brief Все ассеты.
+    * @return записи assets.
+    */
+   std::vector<LibraryAsset> assets() const;
+
+   /**
+    * @brief Ассет по id.
+    * @param id - ассет.
+    * @return запись или пустой id.
+    */
+   LibraryAsset asset_by_id(const QString& id) const;
+
+   /**
+    * @brief Ищет бин по имени.
+    * @param name - имя.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString bin_by_name(const QString& name) const;
+
+   /**
+    * @brief Ищет ассет по имени.
+    * @param name - имя.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString asset_by_name(const QString& name) const;
+
  signals:
    /**
     * @brief База открыта или закрыта.
@@ -320,16 +570,28 @@ class CLibraryStore : public QObject {
  private:
    bool create_schema();
    bool migrate_from_v1();
+   bool migrate_from_v2();
+   bool ensure_pool_tables();
+   bool ensure_root_bin();
+   bool register_assets_from_projects();
    void remove_short_files(const QString& id);
    int read_user_version() const;
    void release_connection();
    bool folder_exists(const QString& id) const;
+   bool bin_exists(const QString& id) const;
+   QString resolved_bin_id(const QString& bin_id) const;
    std::vector<QString> subtree_ids(const QString& root_id) const;
+   std::vector<QString> bin_subtree_ids(const QString& root_id) const;
    bool is_in_subtree(const QString& node,
                       const QString& ancestor) const;
+   bool is_in_bin_subtree(const QString& node,
+                          const QString& ancestor) const;
+   QString asset_id_by_fingerprint(const QString& fingerprint) const;
+   void set_last_error(const QString& error);
    void notify_changed();
 
    bool opened_ = false;
    QString root_path_;
    QString connection_name_;
+   QString last_error_;
 };

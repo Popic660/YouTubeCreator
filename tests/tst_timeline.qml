@@ -44,8 +44,15 @@ TestCase {
       verify(store.open(dir))
       const folder = store.create_folder("", "Film")
       const fixture = paths.fixture_path(fixtureName)
-      const id = store.import_video(folder, fixture)
-      verify(id.length > 0)
+      const shortsBefore = store.short_count()
+      const asset = store.import_media("", fixture)
+      verify(asset.length > 0)
+      compare(store.short_count(), shortsBefore)
+      const id = store.create_short(folder, "Clip")
+      const project = requireChild(shell, "projectDocument")
+      verify(project.open_short(id))
+      const placed = project.place_asset(asset, "", 0, false)
+      verify(placed.length > 0)
       pane.select_entry(id, "short")
       const frame = requireChild(shell, "frameView")
       tryVerify(function() {
@@ -58,8 +65,9 @@ TestCase {
          id: id,
          folder: folder,
          fixture: fixture,
+         asset: asset,
          frame: frame,
-         project: requireChild(shell, "projectDocument")
+         project: project
       }
    }
 
@@ -431,6 +439,152 @@ TestCase {
       requireChild(shell, "confirmAccept").clicked()
       verify(!paths.file_exists(jsonPath))
       compare(ctx.store.short_name(ctx.id), "")
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_twoShortsShareAsset() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const files = ctx.store.media_file_count()
+      const second = ctx.store.create_short(ctx.folder, "Other")
+      verify(ctx.project.open_short(second))
+      const placed = ctx.project.place_asset(ctx.asset, "v1", 0, false)
+      verify(placed.length > 0)
+      compare(ctx.project.clip_asset_id(placed), ctx.asset)
+      compare(ctx.store.media_file_count(), files)
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_assetMarksCopyOnce() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const first = ctx.project.first_clip_on("v1")
+      const original = ctx.project.clip_out(first)
+      const marked = Math.floor(original / 4)
+      verify(ctx.store.set_asset_marks(ctx.asset, 0, marked))
+      compare(ctx.project.clip_out(first), original)
+      const again = ctx.project.place_asset(ctx.asset, "v1", original, false)
+      verify(again.length > 0)
+      compare(ctx.project.clip_out(again) - ctx.project.clip_in(again),
+         marked)
+      compare(ctx.project.clip_out(first), original)
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_insertAndOverwrite() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const first = ctx.project.first_clip_on("v1")
+      const length = ctx.project.clip_out(first) - ctx.project.clip_in(first)
+      const second = ctx.project.place_asset(
+         ctx.asset, "v1", length, false)
+      verify(second.length > 0)
+      compare(ctx.project.clipCount, 2)
+      const inserted = ctx.project.place_asset(
+         ctx.asset, "v1", length, true)
+      verify(inserted.length > 0)
+      compare(ctx.project.clipCount, 3)
+      compare(ctx.project.clip_start(second), length * 2)
+      const duration = ctx.project.durationMs
+      const slice = Math.floor(length / 4)
+      verify(ctx.store.set_asset_marks(ctx.asset, 0, slice))
+      ctx.project.place_asset(ctx.asset, "v1", slice, false)
+      verify(ctx.project.durationMs <= duration + 40)
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_snapToPlayhead() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      ctx.project.playheadMs = 1000
+      DockState.snapEnabled = true
+      compare(ctx.project.snap_ms(1005, 1), 1000)
+      DockState.snapEnabled = false
+      compare(ctx.project.snap_ms(1005, 1), 1005)
+      DockState.snapEnabled = true
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_closeGapKeepsAsset() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const video = ctx.project.first_clip_on("v1")
+      const length = ctx.project.clip_out(video)
+         - ctx.project.clip_in(video)
+      ctx.project.selectedClipId = video
+      ctx.project.playheadMs = Math.floor(length / 3)
+      verify(ctx.project.split_at_playhead())
+      compare(ctx.project.clipCount, 2)
+      let midId = ""
+      for (let i = 0; i < ctx.project.itemCount; ++i) {
+         const id = ctx.project.clip_id_at(i)
+         if (ctx.project.clip_track(id) === "v1"
+               && ctx.project.clip_start(id) > 0) {
+            midId = id
+         }
+      }
+      verify(midId.length > 0)
+      ctx.project.selectedClipId = midId
+      ctx.project.playheadMs = Math.floor(length * 2 / 3)
+      verify(ctx.project.split_at_playhead())
+      compare(ctx.project.clipCount, 3)
+      const v1 = []
+      for (let j = 0; j < ctx.project.itemCount; ++j) {
+         const id = ctx.project.clip_id_at(j)
+         if (ctx.project.clip_track(id) === "v1") {
+            v1.push({
+               id: id,
+               start: ctx.project.clip_start(id)
+            })
+         }
+      }
+      v1.sort(function(a, b) { return a.start - b.start })
+      const leftId = v1[0].id
+      const rightId = v1[2].id
+      ctx.project.selectedClipId = v1[1].id
+      verify(ctx.project.delete_selected_clip())
+      verify(ctx.project.close_gap())
+      const leftEnd = ctx.project.clip_start(leftId)
+         + (ctx.project.clip_out(leftId)
+            - ctx.project.clip_in(leftId))
+      compare(ctx.project.clip_start(rightId), leftEnd)
+      compare(ctx.store.asset_name(ctx.asset), "vertical-short")
+      verify(ctx.store.media_file_count() >= 1)
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_atomicSaveAndRecovery() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const jsonPath = ctx.dir + "/shorts/" + ctx.id + "/project.json"
+      verify(paths.file_exists(jsonPath))
+      verify(!paths.file_exists(jsonPath + ".tmp"))
+      const video = ctx.project.first_clip_on("v1")
+      const original = ctx.project.clip_out(video)
+      const trimmed = Math.floor(original / 2)
+      verify(ctx.project.trim_clip(video, 0, trimmed))
+      ctx.project.flush_recovery()
+      const recovery = ctx.dir + "/shorts/" + ctx.id + "/recovery.json"
+      verify(paths.file_exists(recovery))
+      ctx.project.close()
+      verify(!paths.file_exists(recovery))
+      verify(paths.write_text(recovery,
+         "{\"playhead_ms\":0,\"clips\":[{\"id\":\"r1\",\"track\":\"v1\"," +
+         "\"kind\":\"video\",\"asset_id\":\"" + ctx.asset +
+         "\",\"file\":\"x\",\"in_ms\":0,\"out_ms\":123," +
+         "\"start_ms\":0}]}"))
+      verify(ctx.project.open_short(ctx.id, "restore"))
+      compare(ctx.project.clip_out(ctx.project.first_clip_on("v1")), 123)
+      verify(ctx.project.open_short(ctx.id, "discard"))
+      compare(ctx.project.clip_out(ctx.project.first_clip_on("v1")),
+         trimmed)
+      verify(!paths.file_exists(recovery))
       ctx.store.close()
       paths.remove_tree(ctx.dir)
    }

@@ -65,23 +65,73 @@ Rectangle {
       return ""
    }
 
-   Item {
+   PanelChrome {
       id: timelineHandle
       objectName: "timelineDragHandle"
-      property string panelId: "timeline"
+      panelId: "timeline"
+      title: "Таймлайн"
+      glyphName: "film"
       width: parent.width
-      height: 32
-      Rectangle {
-         anchors.fill: parent
-         color: Theme.menu
-      }
-      Text {
-         anchors.verticalCenter: parent.verticalCenter
-         anchors.left: parent.left
-         anchors.leftMargin: 8
-         text: "Таймлайн"
-         color: Theme.text
-         font.pixelSize: 12
+      onPanelDragStarted: timelineHost.panelDragStarted()
+      onPanelDragFinished: timelineHost.panelDragFinished()
+      extra: Row {
+         spacing: 4
+         Item {
+            objectName: "snapToggle"
+            width: 32
+            height: 32
+            Glyph {
+               anchors.centerIn: parent
+               glyphName: "magnet"
+               strokeColor: DockState.snapEnabled
+                  ? Theme.text : Theme.textDisabled
+            }
+            MouseArea {
+               anchors.fill: parent
+               onClicked: DockState.snapEnabled = !DockState.snapEnabled
+            }
+         }
+         CapsuleButton {
+            objectName: "closeGapButton"
+            implicitHeight: 32
+            text: "Стык"
+            visible: timelineHost.document !== null
+               && timelineHost.document.hasClips
+            onClicked: timelineHost.document.close_gap()
+         }
+         Rectangle {
+            id: playButton
+            objectName: "playPauseButton"
+            width: 32
+            height: 32
+            radius: 16
+            color: Theme.faceFill(playPress.containsMouse,
+               playPress.pressed)
+            visible: timelineHost.document !== null
+               && timelineHost.document.hasClips
+            Glyph {
+               anchors.centerIn: parent
+               glyphName: timelineHost.document
+                  && timelineHost.document.playing
+                  ? "pause" : "play"
+               strokeColor: Theme.textInverse
+            }
+            MouseArea {
+               id: playPress
+               anchors.fill: parent
+               hoverEnabled: true
+               cursorShape: Qt.PointingHandCursor
+               onClicked: timelineHost.document.toggle_play()
+            }
+            HoverHandler {
+               id: playHover
+            }
+            HintTip {
+               visible: playHover.hovered
+               text: "Пуск и пауза. Картинка и звук идут с красной " +
+                  "линии. Тот же жест — клик по кадру 9:16."
+            }
+         }
       }
       Text {
          objectName: "timelineClock"
@@ -99,63 +149,6 @@ Rectangle {
          color: Theme.textSecondary
          font.pixelSize: 12
       }
-      Rectangle {
-         id: playButton
-         objectName: "playPauseButton"
-         anchors.verticalCenter: parent.verticalCenter
-         anchors.right: parent.right
-         anchors.rightMargin: 8
-         width: 32
-         height: 32
-         radius: 16
-         color: Theme.faceFill(playPress.containsMouse, playPress.pressed)
-         visible: timelineHost.document !== null
-            && timelineHost.document.hasClips
-         z: 2
-         Glyph {
-            anchors.centerIn: parent
-            glyphName: timelineHost.document && timelineHost.document.playing
-               ? "pause" : "play"
-            strokeColor: Theme.textInverse
-         }
-         MouseArea {
-            id: playPress
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: timelineHost.document.toggle_play()
-         }
-         HoverHandler {
-            id: playHover
-         }
-         HintTip {
-            visible: playHover.hovered
-            text: "Пуск и пауза. Картинка и звук идут с красной линии. " +
-               "Тот же жест — клик по кадру 9:16. Клик по дорожке " +
-               "перематывает; если ролик играл, после перемотки " +
-               "нажмите пуск снова. В конце линия останавливается, " +
-               "повторный пуск — с начала."
-         }
-      }
-      Item {
-         id: timelineProxy
-         width: 1
-         height: 1
-         Drag.keys: ["panel"]
-         Drag.source: timelineHandle
-         Drag.active: timelinePress.drag.active
-         Drag.hotSpot.x: timelinePress.mouseX
-         Drag.hotSpot.y: timelinePress.mouseY
-      }
-      MouseArea {
-         id: timelinePress
-         anchors.fill: parent
-         drag.target: timelineProxy
-         drag.threshold: 4
-         cursorShape: Qt.SizeAllCursor
-         onPressed: timelineHost.panelDragStarted()
-         onReleased: timelineHost.panelDragFinished()
-      }
    }
 
    Text {
@@ -168,13 +161,13 @@ Rectangle {
       color: Theme.textSecondary
       font.pixelSize: 12
       wrapMode: Text.WordWrap
-      text: "Как работает таймлайн. 1) В папке слева нажмите «⋯» → " +
-         "«Импорт видео» — ролик попадёт на V1, звук на A1. " +
-         "2) Красная линия — текущее время; клик или протяжка по " +
-         "дорожке перематывает кадр. 3) Треугольник справа (или клик " +
-         "по кадру) — пуск со звуком. 4) Цветные блоки — клипы; клик " +
-         "по блоку выделяет его. 5) Лезвие режет по линии. Экспорт — " +
-         "белая кнопка в шапке."
+      text: "Как работает таймлайн. 1) Импортируйте файл в панель " +
+         "«Медиа», создайте ролик в папке и перенесите ассет на " +
+         "дорожку. 2) Красная линия — текущее время; клик или " +
+         "протяжка по дорожке перематывает кадр. 3) Треугольник " +
+         "справа (или клик по кадру) — пуск со звуком. 4) Цветные " +
+         "блоки — клипы; клик по блоку выделяет его. 5) Лезвие режет " +
+         "по линии. Экспорт — белая кнопка в шапке."
    }
 
    Row {

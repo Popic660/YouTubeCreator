@@ -47,6 +47,52 @@ class CTempDirectory : public QObject {
    Q_INVOKABLE bool seed_schema_v1(const QString& directory);
 
    /**
+    * @brief Создаёт library.db схемы 2 с роликом и клипом.
+    * @param directory - папка библиотеки.
+    * @return true, если файлы записаны.
+    */
+   Q_INVOKABLE bool seed_schema_v2(const QString& directory);
+
+   /**
+    * @brief Пишет PNG-картинку во временную папку.
+    * @param directory - каталог.
+    * @return путь файла.
+    */
+   Q_INVOKABLE QString make_image(const QString& directory) const;
+
+   /**
+    * @brief Пишет WAV-файл во временную папку.
+    * @param directory - каталог.
+    * @return путь файла.
+    */
+   Q_INVOKABLE QString make_wav(const QString& directory) const;
+
+   /**
+    * @brief Пишет текст в файл.
+    * @param path - путь.
+    * @param text - содержимое.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool write_text(const QString& path,
+                               const QString& text) const;
+
+   /**
+    * @brief Создаёт каталог со родителями.
+    * @param path - каталог.
+    * @return true, если путь есть.
+    */
+   Q_INVOKABLE bool mkpath(const QString& path) const;
+
+   /**
+    * @brief Копирует файл.
+    * @param source - исходник.
+    * @param dest - назначение.
+    * @return true, если копия есть.
+    */
+   Q_INVOKABLE bool copy_file(const QString& source,
+                              const QString& dest) const;
+
+   /**
     * @brief Путь к фикстуре теста.
     * @param name - имя файла в fixtures/.
     * @return абсолютный путь.

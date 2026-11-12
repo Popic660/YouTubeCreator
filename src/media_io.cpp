@@ -3,6 +3,7 @@
 #include "ffmpeg_api.h"
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -486,4 +487,53 @@ QString CMediaIo::copy_asset(const QString& library_root,
       return {};
    }
    return relative;
+}
+
+QString CMediaIo::file_fingerprint(const QString& path,
+                                   qint64* size_out) {
+   QFile file(path);
+   if (!file.open(QIODevice::ReadOnly)) {
+      return {};
+   }
+   const qint64 size = file.size();
+   if (size_out != nullptr) {
+      *size_out = size;
+   }
+   QCryptographicHash hash(QCryptographicHash::Sha256);
+   hash.addData(QByteArray::number(size));
+   const qint64 chunk = std::min<qint64>(size, 1024 * 1024);
+   hash.addData(file.read(chunk));
+   if (size > chunk) {
+      file.seek(size - chunk);
+      hash.addData(file.read(chunk));
+   }
+   return QString::fromLatin1(hash.result().toHex());
+}
+
+QString CMediaIo::media_kind(const QString& path) {
+   const QString ext = QFileInfo(path).suffix().toLower();
+   static const QStringList kImages = {
+       QStringLiteral("png"), QStringLiteral("jpg"),
+       QStringLiteral("jpeg"), QStringLiteral("webp"),
+       QStringLiteral("gif"), QStringLiteral("bmp"),
+       QStringLiteral("tif"), QStringLiteral("tiff")};
+   if (kImages.contains(ext)) {
+      return QStringLiteral("image");
+   }
+   const MediaInfo info = probe(path);
+   if (info.has_video) {
+      return QStringLiteral("video");
+   }
+   if (info.has_audio) {
+      return QStringLiteral("audio");
+   }
+   static const QStringList kAudio = {
+       QStringLiteral("mp3"), QStringLiteral("wav"),
+       QStringLiteral("aac"), QStringLiteral("m4a"),
+       QStringLiteral("flac"), QStringLiteral("ogg"),
+       QStringLiteral("opus")};
+   if (kAudio.contains(ext)) {
+      return QStringLiteral("audio");
+   }
+   return {};
 }

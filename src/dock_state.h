@@ -14,6 +14,10 @@ class CDockState : public QObject {
                   WRITE set_library_dock NOTIFY layout_changed)
    Q_PROPERTY(QString timelineDock READ timeline_dock
                   WRITE set_timeline_dock NOTIFY layout_changed)
+   Q_PROPERTY(QString mediaDock READ media_dock WRITE set_media_dock
+                  NOTIFY layout_changed)
+   Q_PROPERTY(bool snapEnabled READ snap_enabled
+                  WRITE set_snap_enabled NOTIFY layout_changed)
    Q_PROPERTY(int leftWidth READ left_width WRITE set_left_width
                   NOTIFY layout_changed)
    Q_PROPERTY(int rightWidth READ right_width WRITE set_right_width
@@ -51,6 +55,30 @@ class CDockState : public QObject {
     * @param dock - left, right или bottom.
     */
    void set_timeline_dock(const QString& dock);
+
+   /**
+    * @brief Возвращает док панели медиа.
+    * @return left, right или bottom.
+    */
+   QString media_dock() const;
+
+   /**
+    * @brief Ставит медиа в док.
+    * @param dock - left, right или bottom.
+    */
+   void set_media_dock(const QString& dock);
+
+   /**
+    * @brief Включён ли магнит таймлайна.
+    * @return true, если края липнут.
+    */
+   bool snap_enabled() const;
+
+   /**
+    * @brief Включает или выключает магнит.
+    * @param enabled - новое значение.
+    */
+   void set_snap_enabled(bool enabled);
 
    /**
     * @brief Возвращает ширину левого дока.

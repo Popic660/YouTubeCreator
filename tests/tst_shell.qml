@@ -153,6 +153,21 @@ TestCase {
       }
    }
 
+   function test_defaultDocksAndChrome() {
+      DockState.reset_layout()
+      const shell = createShell()
+      compare(DockState.mediaDock, "left")
+      compare(DockState.libraryDock, "right")
+      compare(DockState.timelineDock, "bottom")
+      compare(requireChild(shell, "libraryChromeTitle").text, "Папки")
+      compare(requireChild(shell, "mediaChromeTitle").text, "Медиа")
+      compare(requireChild(shell, "frameView").centerMode, "empty")
+      verify(findChild(shell, "mediaPane") !== null)
+      verify(findChild(shell, "libraryPane") !== null)
+      verify(findChild(shell, "timelineHost") !== null)
+      verify(findChild(shell, "toolColumn") !== null)
+   }
+
    function test_distinctGlyphs() {
       const shell = createShell()
       const names = [

@@ -50,6 +50,8 @@ class CProjectDocument : public QObject {
    Q_PROPERTY(QString selectedClipId READ selected_clip_id
                   WRITE set_selected_clip_id
                   NOTIFY selection_changed)
+   Q_PROPERTY(bool hasRecovery READ has_recovery
+                  NOTIFY recovery_changed)
 
  public:
    /**
@@ -92,7 +94,8 @@ class CProjectDocument : public QObject {
     * @param short_id - id ролика.
     * @return true, если ролик есть.
     */
-   Q_INVOKABLE bool open_short(const QString& short_id);
+   Q_INVOKABLE bool open_short(const QString& short_id,
+                               const QString& recovery = QString());
 
    /**
     * @brief Закрывает проект.
@@ -105,8 +108,71 @@ class CProjectDocument : public QObject {
     * @param path - файл.
     * @return id ролика или пусто.
     */
+   /**
+    * @brief Импортирует файл в пул.
+    * @param bin_id - бин или пусто для корня.
+    * @param path - файл.
+    * @return id ассета или пусто.
+    */
+   Q_INVOKABLE QString import_media(const QString& bin_id,
+                                    const QString& path);
+
    Q_INVOKABLE QString import_video(const QString& folder_id,
                                     const QString& path);
+
+   /**
+    * @brief Кладёт ассет на дорожку.
+    * @param asset_id - ассет пула.
+    * @param track - v1, v2, a1 или пусто.
+    * @param start_ms - старт на таймлайне.
+    * @param insert - вставка со сдвигом хвоста.
+    * @return id клипа или пусто.
+    */
+   Q_INVOKABLE QString place_asset(const QString& asset_id,
+                                   const QString& track,
+                                   qint64 start_ms, bool insert);
+
+   /**
+    * @brief Закрывает первый разрыв на дорожке выбора.
+    * @return true, если клип сдвинут.
+    */
+   Q_INVOKABLE bool close_gap();
+
+   /**
+    * @brief Примагничивает время к краям и ползунку.
+    * @param time_ms - исходное время.
+    * @param ms_per_pixel - масштаб.
+    * @return время после магнита.
+    */
+   Q_INVOKABLE qint64 snap_ms(qint64 time_ms,
+                              double ms_per_pixel) const;
+
+   /**
+    * @brief Двигает клип по дорожке.
+    * @param clip_id - клип.
+    * @param start_ms - новый старт.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool move_clip(const QString& clip_id,
+                              qint64 start_ms);
+
+   /**
+    * @brief Пишет recovery сразу.
+    */
+   Q_INVOKABLE void flush_recovery();
+
+   /**
+    * @brief Есть ли журнал ролика.
+    * @return true, если recovery.json на диске.
+    */
+   bool has_recovery() const;
+
+   /**
+    * @brief Id ассета клипа.
+    * @param clip_id - клип.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString clip_asset_id(const QString& clip_id) const;
 
    /**
     * @brief Импортирует видео в черновик.
@@ -338,6 +404,7 @@ class CProjectDocument : public QObject {
    void playhead_changed();
    void playing_changed();
    void selection_changed();
+   void recovery_changed();
 
  private:
    TimelineClip* mutable_clip(const QString& id);
@@ -352,6 +419,14 @@ class CProjectDocument : public QObject {
    QString write_poster(const QString& short_id, const QString& file);
    void write_waveform(const QString& asset_id, const QString& file);
    void tick_play();
+   void overwrite_range(const QString& track, qint64 start_ms,
+                        qint64 end_ms);
+   QString default_track(const QString& kind) const;
+   QString recovery_path() const;
+   void schedule_recovery();
+   void write_recovery();
+   void clear_recovery();
+   QJsonObject read_json_file(const QString& path) const;
 
    CLibraryStore* store_ = nullptr;
    QString short_id_;
@@ -361,4 +436,6 @@ class CProjectDocument : public QObject {
    bool playing_ = false;
    QString selected_clip_id_;
    QTimer play_timer_;
+   QTimer recovery_timer_;
+   bool suppress_recovery_ = false;
 };

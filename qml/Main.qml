@@ -15,6 +15,7 @@ ApplicationWindow {
    readonly property bool channelConnected: false
    readonly property string libraryDock: DockState.libraryDock
    readonly property string timelineDock: DockState.timelineDock
+   readonly property string mediaDock: DockState.mediaDock
    readonly property int leftDockWidth: DockState.leftWidth
    readonly property int rightDockWidth: DockState.rightWidth
    readonly property int bottomDockHeight: DockState.bottomHeight
@@ -38,7 +39,45 @@ ApplicationWindow {
       if (panel === "timeline") {
          DockState.timelineDock = dock
       }
+      if (panel === "media") {
+         DockState.mediaDock = dock
+      }
+      activeTab = panel
       dropTarget = ""
+   }
+
+   function panels_in(dock) {
+      const ids = []
+      if (mediaDock === dock) {
+         ids.push("media")
+      }
+      if (libraryDock === dock) {
+         ids.push("library")
+      }
+      if (timelineDock === dock) {
+         ids.push("timeline")
+      }
+      return ids
+   }
+
+   function panel_title(id) {
+      if (id === "media") {
+         return "Медиа"
+      }
+      if (id === "library") {
+         return "Папки"
+      }
+      return "Таймлайн"
+   }
+
+   function panel_visible(id) {
+      const dock = id === "media" ? mediaDock
+         : id === "library" ? libraryDock : timelineDock
+      const ids = panels_in(dock)
+      if (ids.length <= 1) {
+         return true
+      }
+      return activeTab === id
    }
 
    function show_drop_target(dock) {
@@ -53,9 +92,24 @@ ApplicationWindow {
       const pane = libraryPane
       if (pane.selectedKind === "short" && pane.selectedId.length > 0) {
          projectDocument.open_short(pane.selectedId)
+         if (projectDocument.hasRecovery) {
+            center_recovery_dialog()
+            recoveryDialog.open()
+         }
       } else {
          projectDocument.close()
       }
+   }
+
+   function center_recovery_dialog() {
+      const host = shell.contentItem
+      recoveryDialog.parent = host
+      Qt.callLater(function() {
+         recoveryDialog.x = Math.round(
+            (host.width - recoveryDialog.width) / 2)
+         recoveryDialog.y = Math.round(
+            (host.height - recoveryDialog.height) / 2)
+      })
    }
 
    function handle_tool(name) {
@@ -139,6 +193,12 @@ ApplicationWindow {
       store: libraryStore
       filter: headerBar.query
    }
+   CMediaModel {
+      id: mediaModel
+      objectName: "mediaModel"
+      store: libraryStore
+      filter: headerBar.query
+   }
    CProjectDocument {
       id: projectDocument
       objectName: "projectDocument"
@@ -178,12 +238,41 @@ ApplicationWindow {
       })
    }
 
+   component DockTabChip: Rectangle {
+      id: chip
+      property string panelId: ""
+      property string hostDock: ""
+      visible: (panelId === "media" && shell.mediaDock === hostDock)
+         || (panelId === "library" && shell.libraryDock === hostDock)
+         || (panelId === "timeline" && shell.timelineDock === hostDock)
+      height: 32
+      width: tabLabel.implicitWidth + 16
+      radius: 8
+      color: shell.activeTab === panelId ? Theme.fill : Theme.tonal
+      Text {
+         id: tabLabel
+         anchors.centerIn: parent
+         text: shell.panel_title(chip.panelId)
+         color: shell.activeTab === chip.panelId
+            ? Theme.textInverse : Theme.text
+         font.pixelSize: 14
+         font.weight: 500
+      }
+      MouseArea {
+         anchors.fill: parent
+         onClicked: shell.activeTab = chip.panelId
+      }
+   }
+
    component DockBox: Rectangle {
       id: dock
       property string dockName: "right"
       property alias slot: slotItem
-      readonly property bool occupied: shell.libraryDock === dockName
-         || shell.timelineDock === dockName
+      readonly property int panelCount:
+         (shell.mediaDock === dockName ? 1 : 0)
+         + (shell.libraryDock === dockName ? 1 : 0)
+         + (shell.timelineDock === dockName ? 1 : 0)
+      readonly property bool occupied: panelCount > 0
       readonly property bool highlighted: shell.dropTarget === dockName
       objectName: dockName === "left" ? "dockLeft"
          : dockName === "right" ? "dockRight" : "dockBottom"
@@ -191,34 +280,34 @@ ApplicationWindow {
       border.color: highlighted ? Theme.link : "transparent"
       border.width: highlighted ? 2 : 0
 
-      Loader {
-         id: tabLoader
-         active: shell.libraryDock === dock.dockName
-            && shell.timelineDock === dock.dockName
+      Row {
+         id: tabRow
+         objectName: "dockTabs"
+         visible: dock.panelCount > 1
+         height: 32
+         spacing: 4
          z: 2
-         sourceComponent: Row {
-            objectName: "dockTabs"
-            height: 32
-            spacing: 4
-            Button {
-               objectName: "tabLibrary"
-               text: "Папки"
-               height: 32
-               onClicked: shell.activeTab = "library"
-            }
-            Button {
-               objectName: "tabTimeline"
-               text: "Таймлайн"
-               height: 32
-               onClicked: shell.activeTab = "timeline"
-            }
+         DockTabChip {
+            objectName: "tabMedia"
+            panelId: "media"
+            hostDock: dock.dockName
+         }
+         DockTabChip {
+            objectName: "tabLibrary"
+            panelId: "library"
+            hostDock: dock.dockName
+         }
+         DockTabChip {
+            objectName: "tabTimeline"
+            panelId: "timeline"
+            hostDock: dock.dockName
          }
       }
 
       Item {
          id: slotItem
          anchors.fill: parent
-         anchors.topMargin: tabLoader.active ? 32 : 0
+         anchors.topMargin: dock.panelCount > 1 ? 32 : 0
       }
 
       DropArea {
@@ -425,14 +514,26 @@ ApplicationWindow {
       }
    }
 
+   MediaPane {
+      id: mediaPane
+      parent: shell.mediaDock === "right" ? rightDock.slot
+         : shell.mediaDock === "bottom" ? bottomDock.slot
+         : leftDock.slot
+      anchors.fill: parent
+      visible: shell.panel_visible("media")
+      onPanelDragStarted: shell.start_panel_drag()
+      onPanelDragFinished: shell.end_panel_drag()
+      store: libraryStore
+      mediaModel: mediaModel
+   }
+
    LibraryPane {
       id: libraryPane
       parent: shell.libraryDock === "left" ? leftDock.slot
          : shell.libraryDock === "bottom" ? bottomDock.slot
          : rightDock.slot
       anchors.fill: parent
-      visible: shell.libraryDock !== shell.timelineDock
-         || shell.activeTab === "library"
+      visible: shell.panel_visible("library")
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
       store: libraryStore
@@ -446,8 +547,7 @@ ApplicationWindow {
          : shell.timelineDock === "right" ? rightDock.slot
          : bottomDock.slot
       anchors.fill: parent
-      visible: shell.libraryDock !== shell.timelineDock
-         || shell.activeTab === "timeline"
+      visible: shell.panel_visible("timeline")
       document: projectDocument
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
@@ -513,6 +613,58 @@ ApplicationWindow {
             anchors.fill: parent
             color: Theme.link
             opacity: shell.dropTarget === "bottom" ? 0.35 : 0.12
+         }
+      }
+   }
+
+   Dialog {
+      id: recoveryDialog
+      objectName: "recoveryDialog"
+      modal: true
+      width: 400
+      title: "Восстановление"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: shell.center_recovery_dialog()
+      contentItem: ColumnLayout {
+         spacing: 12
+         Text {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Theme.text
+            font.pixelSize: 14
+            text: "Есть снимок таймлайна после правки. " +
+               "Восстановить его, отложить или отбросить?"
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "recoveryRestore"
+               text: "Восстановить"
+               filled: true
+               onClicked: {
+                  projectDocument.open_short(
+                     libraryPane.selectedId, "restore")
+                  recoveryDialog.close()
+               }
+            }
+            CapsuleButton {
+               objectName: "recoveryDefer"
+               text: "Отложить"
+               onClicked: recoveryDialog.close()
+            }
+            CapsuleButton {
+               objectName: "recoveryDiscard"
+               text: "Отбросить"
+               onClicked: {
+                  projectDocument.open_short(
+                     libraryPane.selectedId, "discard")
+                  recoveryDialog.close()
+               }
+            }
          }
       }
    }

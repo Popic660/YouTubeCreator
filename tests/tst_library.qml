@@ -15,6 +15,10 @@ TestCase {
       CLibraryStore {}
    }
    Component {
+      id: projectComponent
+      CProjectDocument {}
+   }
+   Component {
       id: modelComponent
       CLibraryModel {}
    }
@@ -84,12 +88,15 @@ TestCase {
       const dir = paths.make()
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 2)
+      compare(store.user_version(), 3)
       verify(store.schema_contains("folders"))
       verify(store.schema_contains("shorts"))
+      verify(store.schema_contains("bins"))
+      verify(store.schema_contains("assets"))
       verify(store.schema_contains("folders_name"))
       verify(store.schema_contains("shorts_name"))
       verify(store.schema_contains("shorts_folder"))
+      verify(store.rootBinId.length > 0)
       const id = store.create_folder("", "Clips")
       verify(id.length > 0)
       store.close()
@@ -110,11 +117,162 @@ TestCase {
       verify(paths.seed_schema_v1(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 2)
+      compare(store.user_version(), 3)
       compare(store.folder_name("f1"), "Old")
+      verify(store.schema_contains("bins"))
+      verify(store.rootBinId.length > 0)
       const clip = store.create_short("f1", "Draft")
       compare(store.short_duration_ms(clip), 0)
       verify(!store.short_has_poster(clip))
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_migrateFromV2RegistersAssets() {
+      const dir = paths.make()
+      verify(paths.seed_schema_v2(dir))
+      const store = createStore()
+      verify(store.open(dir))
+      compare(store.user_version(), 3)
+      compare(store.folder_name("f1"), "Old")
+      compare(store.short_name("s1"), "Clip")
+      compare(store.asset_name("a1"), "vertical-short")
+      compare(store.asset_relpath("a1"),
+         "media/a1/vertical-short.mp4")
+      compare(store.asset_kind("a1"), "video")
+      verify(store.rootBinId.length > 0)
+      compare(store.asset_bin("a1"), store.rootBinId)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_nestedBinsRenameReparentAndEmptyName() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      const before = store.bin_count()
+      const parent = store.create_bin("", "Parent")
+      verify(parent.length > 0)
+      compare(store.bin_parent(parent), store.rootBinId)
+      const child = store.create_bin(parent, "Child")
+      compare(store.bin_parent(child), parent)
+      verify(store.rename_bin(child, "Renamed"))
+      compare(store.bin_name(child), "Renamed")
+      verify(!store.rename_bin(child, "  "))
+      compare(store.bin_name(child), "Renamed")
+      verify(store.create_bin("", "").length === 0)
+      compare(store.bin_count(), before + 2)
+      const other = store.create_bin("", "Other")
+      verify(store.reparent_bin(child, other))
+      compare(store.bin_parent(child), other)
+      verify(!store.reparent_bin(other, child))
+      compare(store.bin_parent(other), store.rootBinId)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_importMediaDoesNotCreateShort() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      const shortsBefore = store.short_count()
+      const filesBefore = store.media_file_count()
+      const asset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      verify(asset.length > 0)
+      compare(store.asset_kind(asset), "video")
+      verify(store.asset_relpath(asset).indexOf("media/") === 0)
+      verify(store.asset_duration_ms(asset) > 0)
+      compare(store.short_count(), shortsBefore)
+      compare(store.media_file_count(), filesBefore + 1)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_importKindsAndFingerprintReuse() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      const image = store.import_media("", paths.make_image(dir))
+      verify(image.length > 0)
+      compare(store.asset_kind(image), "image")
+      const wav = store.import_media("", paths.make_wav(dir))
+      verify(wav.length > 0)
+      compare(store.asset_kind(wav), "audio")
+      verify(store.import_media("", "").length === 0)
+      const fixture = paths.fixture_path("vertical-short.mp4")
+      const first = store.import_media("", fixture)
+      const files = store.media_file_count()
+      const second = store.import_media("", fixture)
+      compare(second, first)
+      compare(store.media_file_count(), files)
+      const otherBin = store.create_bin("", "Broll")
+      const moved = store.import_media(otherBin, fixture)
+      verify(moved.length > 0)
+      verify(moved !== first)
+      compare(store.asset_relpath(moved), store.asset_relpath(first))
+      compare(store.media_file_count(), files)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_importFolderMirrorsBins() {
+      const dir = paths.make()
+      const disk = paths.make()
+      const inner = disk + "/Shoot/Inner"
+      verify(paths.mkpath(inner))
+      verify(paths.copy_file(
+         paths.fixture_path("vertical-short.mp4"),
+         inner + "/clip.mp4"))
+      const store = createStore()
+      verify(store.open(dir))
+      const shortsBefore = store.short_count()
+      const bin = store.import_folder("", disk + "/Shoot")
+      verify(bin.length > 0)
+      compare(store.bin_name(bin), "Shoot")
+      const innerId = store.bin_by_name("Inner")
+      verify(innerId.length > 0)
+      compare(store.bin_parent(innerId), bin)
+      const assetId = store.asset_by_name("clip")
+      verify(assetId.length > 0)
+      compare(store.asset_bin(assetId), innerId)
+      verify(store.bin_count() >= 3)
+      compare(store.short_count(), shortsBefore)
+      store.close()
+      paths.remove_tree(dir)
+      paths.remove_tree(disk)
+   }
+
+   function test_deleteAssetBusyAndFree() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      const freeAsset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      verify(freeAsset.length > 0)
+      verify(!store.delete_asset(freeAsset, false))
+      compare(store.asset_name(freeAsset), "vertical-short")
+      verify(store.delete_asset(freeAsset, true))
+      compare(store.asset_name(freeAsset), "")
+      compare(store.media_file_count(), 0)
+
+      const busyAsset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      const folder = store.create_folder("", "Film")
+      const draft = store.create_short(folder, "Draft")
+      const project = createTemporaryObject(
+         projectComponent, testCase)
+      verify(project !== null)
+      project.store = store
+      verify(project.open_short(draft))
+      const clip = project.place_asset(busyAsset, "v1", 0, false)
+      verify(clip.length > 0)
+      verify(store.asset_is_busy(busyAsset))
+      verify(!store.delete_asset(busyAsset, true))
+      compare(store.lastError, "busy")
+      compare(store.asset_name(busyAsset), "vertical-short")
+      verify(store.media_file_count() >= 1)
+      project.close()
       store.close()
       paths.remove_tree(dir)
    }
@@ -423,6 +581,22 @@ TestCase {
       tryVerify(function() {
          return findChild(shell, "notFoundMessage") === null
       })
+
+      const asset = store.import_media("",
+         paths.fixture_path("vertical-short.mp4"))
+      verify(asset.length > 0)
+      const mediaModel = requireChild(shell, "mediaModel")
+      requireChild(shell, "searchText").text = "vertical-short"
+      compare(model.count, 0)
+      verify(requireChild(shell, "notFoundMessage").visible)
+      verify(mediaModel.count >= 1)
+      verify(findChild(shell, "mediaNotFoundMessage") === null)
+      requireChild(shell, "searchText").text = "no-such-name-zz"
+      compare(model.count, 0)
+      compare(mediaModel.count, 0)
+      compare(requireChild(shell, "mediaNotFoundMessage").color,
+         "#aaaaaa")
+      requireChild(shell, "searchText").text = ""
       store.close()
       paths.remove_tree(dir)
    }
@@ -491,6 +665,44 @@ TestCase {
       paths.remove_tree(second)
    }
 
+   function test_mediaChromeGridAndScrub() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      verify(store.open(dir))
+      compare(requireChild(shell, "libraryChromeTitle").text, "Папки")
+      compare(requireChild(shell, "mediaChromeTitle").text, "Медиа")
+      const media = requireChild(shell, "mediaPane")
+      const asset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      verify(asset.length > 0)
+      media.gridMode = true
+      let preview = null
+      tryVerify(function() {
+         preview = findChild(media, "mediaPreview")
+         return preview !== null
+      })
+      compare(preview.radius, 12)
+      const badge = findChild(media, "mediaDurationBadge")
+      verify(badge !== null)
+      compare(media.hover_scrub(25, 100, 1000), 250)
+      compare(media.lastScrubMs, 250)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_dockChipsSelectedText() {
+      const shell = createShell()
+      shell.place_panel("library", "left")
+      const tab = requireChild(shell, "tabLibrary")
+      compare(tab.radius, 8)
+      compare(tab.height, 32)
+      compare(tab.color, "#f1f1f1")
+      const label = tab.children[0]
+      compare(label.color, "#0f0f0f")
+      DockState.reset_layout()
+   }
+
    function test_searchGlyph() {
       const shell = createShell()
       const glyph = requireChild(shell, "searchGlyph")
@@ -522,6 +734,7 @@ TestCase {
       verify(store.open(dir))
       const parent = store.create_folder("", "Parent")
       store.create_folder(parent, "Child")
+      store.create_short(parent, "Clip")
       requireChild(shell, "libraryModel").toggle_id(parent)
       const pane = requireChild(shell, "libraryPane")
       const glyph = requireChild(pane, "folderGlyph")
@@ -529,7 +742,13 @@ TestCase {
       compare(glyph.glyphName, "folder")
       const line = requireChild(pane, "nestLine")
       compare(line.width, 1)
-      compare(line.color, Qt.rgba(1, 1, 1, 0.2))
+      compare(line.color, "#717171")
+      compare(glyph.height, 24)
+      const parentRow = glyph.parent
+      compare(parentRow.height, 40)
+      const shortGlyph = requireChild(pane, "shortGlyph")
+      compare(shortGlyph.glyphName, "short")
+      verify(shortGlyph.signature !== glyph.signature)
       store.close()
       paths.remove_tree(dir)
    }
@@ -582,6 +801,14 @@ TestCase {
       verify(itemPos(libraryAgain, again).x < itemPos(frameAgain, again).x)
       verify(itemPos(timelineAgain, again).x < itemPos(frameAgain, again).x)
       DockState.reset_layout()
+      const resetShell = createShell()
+      compare(DockState.mediaDock, "left")
+      compare(DockState.libraryDock, "right")
+      compare(DockState.timelineDock, "bottom")
+      const mediaReset = requireChild(resetShell, "mediaPane")
+      const frameReset = requireChild(resetShell, "frameView")
+      verify(itemPos(mediaReset, resetShell).x + 4
+         < itemPos(frameReset, resetShell).x)
       const fresh = createShell()
       const freshLibrary = requireChild(fresh, "libraryPane")
       const freshFrame = requireChild(fresh, "frameView")

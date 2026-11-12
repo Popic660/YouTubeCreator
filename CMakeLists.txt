@@ -128,6 +128,8 @@ qt_add_qml_module(creator_qml
     src/library_store.cpp
     src/library_model.h
     src/library_model.cpp
+    src/media_model.h
+    src/media_model.cpp
     src/dock_state.h
     src/dock_state.cpp
     src/media_io.h
@@ -150,6 +152,8 @@ qt_add_qml_module(creator_qml
     qml/FrameView.qml
     qml/TimelineHost.qml
     qml/LibraryPane.qml
+    qml/MediaPane.qml
+    qml/PanelChrome.qml
     qml/CapsuleButton.qml
     qml/HintTip.qml
 )

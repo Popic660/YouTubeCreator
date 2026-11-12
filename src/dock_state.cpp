@@ -45,6 +45,30 @@ void CDockState::set_timeline_dock(const QString& dock) {
    write_dock("layout/timelineDock", dock);
 }
 
+QString CDockState::media_dock() const {
+   return read_dock("layout/mediaDock", "left");
+}
+
+void CDockState::set_media_dock(const QString& dock) {
+   write_dock("layout/mediaDock", dock);
+}
+
+bool CDockState::snap_enabled() const {
+   QSettings settings;
+   return settings.value(QStringLiteral("layout/snapEnabled"), true)
+       .toBool();
+}
+
+void CDockState::set_snap_enabled(bool enabled) {
+   if (enabled == snap_enabled()) {
+      return;
+   }
+   QSettings settings;
+   settings.setValue(QStringLiteral("layout/snapEnabled"), enabled);
+   settings.sync();
+   emit layout_changed();
+}
+
 int CDockState::left_width() const {
    return read_size("layout/leftWidth", kDefaultSide);
 }
@@ -73,6 +97,8 @@ void CDockState::reset_layout() {
    QSettings settings;
    settings.remove(QStringLiteral("layout/libraryDock"));
    settings.remove(QStringLiteral("layout/timelineDock"));
+   settings.remove(QStringLiteral("layout/mediaDock"));
+   settings.remove(QStringLiteral("layout/snapEnabled"));
    settings.remove(QStringLiteral("layout/leftWidth"));
    settings.remove(QStringLiteral("layout/rightWidth"));
    settings.remove(QStringLiteral("layout/bottomHeight"));

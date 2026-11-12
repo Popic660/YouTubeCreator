@@ -73,4 +73,20 @@ class CMediaIo {
    static QString copy_asset(const QString& library_root,
                              const QString& source_path,
                              const QString& asset_id);
+
+   /**
+    * @brief Считает отпечаток размера и краёв файла.
+    * @param path - локальный файл.
+    * @param size_out - размер в байтах или nullptr.
+    * @return hex SHA-256 или пусто.
+    */
+   static QString file_fingerprint(const QString& path,
+                                   qint64* size_out);
+
+   /**
+    * @brief Определяет тип медиа по расширению и probe.
+    * @param path - локальный файл.
+    * @return video, audio, image или пусто.
+    */
+   static QString media_kind(const QString& path);
 };

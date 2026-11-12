@@ -18,7 +18,7 @@ Rectangle {
    property string confirmShortId: ""
    property string selectedId: ""
    property string selectedKind: ""
-   property alias importDialog: importDialog
+   property string panelId: "library"
    signal panelDragStarted()
    signal panelDragFinished()
 
@@ -210,63 +210,30 @@ Rectangle {
          visible: pane.libraryOpen
          text: "Создать папку"
          hint: "Новая папка в корне дерева. Внутри папки через «⋯»: " +
-            "ещё папка, черновик ролика или импорт видео."
+            "ещё папка или черновик ролика."
          onClicked: pane.open_name_dialog("createRoot", "")
       }
 
-      Item {
+      PanelChrome {
          id: libraryDragHandle
          objectName: "libraryDragHandle"
-         property string panelId: "library"
+         panelId: "library"
+         title: "Папки"
+         glyphName: "folder"
          Layout.fillWidth: true
-         Layout.preferredHeight: 32
-         Rectangle {
-            anchors.fill: parent
-            color: Theme.menu
-         }
-         Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: 8
-            text: "Папки"
-            color: Theme.text
-            font.pixelSize: 12
-         }
-         CapsuleButton {
+         onPanelDragStarted: pane.panelDragStarted()
+         onPanelDragFinished: pane.panelDragFinished()
+         extra: CapsuleButton {
             id: deleteShortButton
             objectName: "deleteShortButton"
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: 4
             visible: pane.selectedKind === "short"
                && pane.selectedId.length > 0
             implicitHeight: 32
-            z: 2
             text: "Удалить"
             hint: "Удалить выбранный ролик из папки. Появится вопрос; " +
                "«Отмена» ничего не трогает. То же действие — правая " +
-               "кнопка мыши по превью ролика. Клипы на таймлайне " +
-               "пропадут вместе с файлом монтажа."
+               "кнопка мыши по превью ролика."
             onClicked: pane.begin_delete_short(pane.selectedId)
-         }
-         Item {
-            id: libraryProxy
-            width: 1
-            height: 1
-            Drag.keys: ["panel"]
-            Drag.source: libraryDragHandle
-            Drag.active: libraryPress.drag.active
-            Drag.hotSpot.x: libraryPress.mouseX
-            Drag.hotSpot.y: libraryPress.mouseY
-         }
-         MouseArea {
-            id: libraryPress
-            anchors.fill: parent
-            drag.target: libraryProxy
-            drag.threshold: 4
-            cursorShape: Qt.SizeAllCursor
-            onPressed: pane.panelDragStarted()
-            onReleased: pane.panelDragFinished()
          }
       }
 
@@ -313,7 +280,7 @@ Rectangle {
             readonly property string posterPath: model.posterPath || ""
             readonly property int durationMs: model.durationMs || 0
             width: rowColumn.width
-            height: kind === "folder" ? 40 : shortCard.implicitHeight
+            height: kind === "folder" ? 40 : 40 + shortCard.implicitHeight
 
             Item {
                id: ghost
@@ -332,55 +299,57 @@ Rectangle {
                radius: 10
                visible: kind === "folder"
                color: pane.selectedId === row.entryId
-                  ? Theme.selected : "transparent"
+                  ? Theme.tonal : "transparent"
             }
 
             Repeater {
                model: row.depth
                Rectangle {
                   objectName: "nestLine"
-                  x: 8 + index * 12
+                  x: 8 + index * 16
                   y: 0
                   width: 1
                   height: row.height
-                  color: Theme.outline
+                  color: Theme.textDisabled
                }
             }
 
             Glyph {
                objectName: "folderGlyph"
                visible: kind === "folder"
-               x: row.depth * 12
-               width: 16
-               height: 16
-               anchors.verticalCenter: parent.verticalCenter
+               x: 8 + row.depth * 16
+               y: 8
+               width: 24
+               height: 24
                glyphName: "folder"
                strokeColor: Theme.text
             }
 
+            Glyph {
+               objectName: "shortGlyph"
+               visible: kind === "short"
+               x: 8 + row.depth * 16
+               y: 8
+               width: 24
+               height: 24
+               glyphName: "short"
+               strokeColor: Theme.text
+            }
+
             Row {
-               x: row.depth * 12 + (kind === "folder" ? 20 : 0)
+               x: 8 + row.depth * 16 + 24
                width: parent.width - x
                height: kind === "folder" ? 40 : implicitHeight
                spacing: 4
 
-               Shape {
+               Glyph {
                   visible: kind === "folder" && row.hasChildren
-                  width: 16
-                  height: 16
+                  width: 18
+                  height: 18
                   anchors.verticalCenter: parent.verticalCenter
-                  ShapePath {
-                     strokeColor: Theme.textSecondary
-                     strokeWidth: 2
-                     fillColor: "transparent"
-                     capStyle: ShapePath.RoundCap
-                     joinStyle: ShapePath.RoundJoin
-                     PathSvg {
-                        path: row.expanded
-                           ? "M6 9 L12 15 L18 9"
-                           : "M9 6 L15 12 L9 18"
-                     }
-                  }
+                  glyphName: row.expanded ? "chevronDown"
+                                          : "chevronRight"
+                  strokeColor: Theme.textDisabled
                }
 
                Text {
@@ -524,8 +493,7 @@ Rectangle {
                HintTip {
                   visible: folderMenuButton.hovered
                   text: "Меню папки: создать вложенную папку, черновик, " +
-                     "импорт видео, переименовать, удалить папку, промпт. " +
-                     "Импорт сразу кладёт ролик на таймлайн V1 и звук A1."
+                     "переименовать, удалить папку, промпт."
                }
             }
          }
@@ -539,18 +507,6 @@ Rectangle {
       title: "Папка библиотеки"
       onAccepted: pane.apply_library_folder(selectedFolder)
       onRejected: pane.decline_library_folder()
-   }
-
-   FileDialog {
-      id: importDialog
-      objectName: "importDialog"
-      title: "Импорт видео"
-      nameFilters: ["Video (*.mp4 *.mov *.mkv *.webm)"]
-      onAccepted: {
-         if (pane.store !== null) {
-            pane.store.import_video(pane.menuFolderId, selectedFile)
-         }
-      }
    }
 
    Menu {
@@ -591,11 +547,6 @@ Rectangle {
          objectName: "menuCreateShort"
          text: "Создать ролик"
          onTriggered: pane.open_name_dialog("createShort", "")
-      }
-      LibraryMenuItem {
-         objectName: "menuImportVideo"
-         text: "Импорт видео"
-         onTriggered: importDialog.open()
       }
       LibraryMenuItem {
          objectName: "menuRename"
