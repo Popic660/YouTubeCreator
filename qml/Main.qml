@@ -49,6 +49,50 @@ ApplicationWindow {
       dropTarget = ""
    }
 
+   function apply_selection() {
+      const pane = libraryPane
+      if (pane.selectedKind === "short" && pane.selectedId.length > 0) {
+         projectDocument.open_short(pane.selectedId)
+      } else {
+         projectDocument.close()
+      }
+   }
+
+   function handle_tool(name) {
+      const video = projectDocument.first_clip_on("v1")
+      if (name === "toolSelect") {
+         projectDocument.selectedClipId = video
+      } else if (name === "toolRazor" || name === "opSplit") {
+         const duration = Math.max(projectDocument.durationMs, 1)
+         if (projectDocument.playheadMs <= 0 ||
+             projectDocument.playheadMs >= duration) {
+            projectDocument.playheadMs = Math.floor(duration / 2)
+         }
+         projectDocument.split_at_playhead()
+      } else if (name === "toolHand") {
+         projectDocument.set_transform(
+            video, projectDocument.clip_scale(video),
+            projectDocument.clip_offset_x(video) + 12,
+            projectDocument.clip_offset_y(video))
+      } else if (name === "toolZoom") {
+         projectDocument.set_transform(
+            video, projectDocument.clip_scale(video) * 1.25,
+            projectDocument.clip_offset_x(video),
+            projectDocument.clip_offset_y(video))
+      } else if (name === "opCrop") {
+         projectDocument.apply_cover()
+      } else if (name === "opTransform") {
+         projectDocument.set_transform(video, 1.2, 8, 8)
+      } else if (name === "opVolume") {
+         const audio = projectDocument.first_clip_on("a1")
+         projectDocument.set_volume(audio, 0.4)
+      } else if (name === "opDelete") {
+         projectDocument.delete_selected_clip()
+      } else if (name === "toolText") {
+         projectDocument.add_text("Текст")
+      }
+   }
+
    FontLoader {
       id: robotoRegular
       source: "qrc:/fonts/Roboto-Regular.ttf"
@@ -95,9 +139,43 @@ ApplicationWindow {
       store: libraryStore
       filter: headerBar.query
    }
+   CProjectDocument {
+      id: projectDocument
+      objectName: "projectDocument"
+      store: libraryStore
+   }
+   CExporter {
+      id: exporter
+      objectName: "exporter"
+      document: projectDocument
+      compositor: frameView.compositor
+   }
+   CPreviewAudio {
+      id: previewAudio
+      objectName: "previewAudio"
+      document: projectDocument
+   }
 
    header: HeaderBar {
       id: headerBar
+      exportEnabled: projectDocument.hasClips
+      onExportRequested: shell.run_export()
+   }
+
+   function run_export() {
+      exporter.export_current()
+      center_export_dialog()
+      exportDialog.open()
+   }
+
+   function center_export_dialog() {
+      const host = shell.contentItem
+      exportDialog.parent = host
+      Qt.callLater(function() {
+         exportDialog.x = Math.round((host.width - exportDialog.width) / 2)
+         exportDialog.y = Math.round(
+            (host.height - exportDialog.height) / 2)
+      })
    }
 
    component DockBox: Rectangle {
@@ -227,14 +305,46 @@ ApplicationWindow {
             ToolColumn {
                objectName: "toolColumn"
                Layout.alignment: Qt.AlignTop
-               DisabledTool { toolName: "toolSelect" }
-               DisabledTool { toolName: "toolRazor" }
-               DisabledTool { toolName: "toolHand" }
-               DisabledTool { toolName: "toolText" }
-               DisabledTool { toolName: "toolZoom" }
+               DisabledTool {
+                  toolName: "toolSelect"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolRazor"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolHand"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolText"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolZoom"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
             }
 
             FrameView {
+               id: frameView
+               document: projectDocument
                Layout.fillWidth: true
                Layout.fillHeight: true
             }
@@ -242,11 +352,41 @@ ApplicationWindow {
             ToolColumn {
                objectName: "operationColumn"
                Layout.alignment: Qt.AlignTop
-               DisabledTool { toolName: "opSplit" }
-               DisabledTool { toolName: "opCrop" }
-               DisabledTool { toolName: "opTransform" }
-               DisabledTool { toolName: "opVolume" }
-               DisabledTool { toolName: "opDelete" }
+               DisabledTool {
+                  toolName: "opSplit"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opCrop"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opTransform"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opVolume"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opDelete"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
             }
          }
 
@@ -286,6 +426,7 @@ ApplicationWindow {
    }
 
    LibraryPane {
+      id: libraryPane
       parent: shell.libraryDock === "left" ? leftDock.slot
          : shell.libraryDock === "bottom" ? bottomDock.slot
          : rightDock.slot
@@ -296,6 +437,8 @@ ApplicationWindow {
       onPanelDragFinished: shell.end_panel_drag()
       store: libraryStore
       libraryModel: libraryModel
+      onSelectedIdChanged: shell.apply_selection()
+      onSelectedKindChanged: shell.apply_selection()
    }
 
    TimelineHost {
@@ -305,6 +448,7 @@ ApplicationWindow {
       anchors.fill: parent
       visible: shell.libraryDock !== shell.timelineDock
          || shell.activeTab === "timeline"
+      document: projectDocument
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
    }
@@ -369,6 +513,52 @@ ApplicationWindow {
             anchors.fill: parent
             color: Theme.link
             opacity: shell.dropTarget === "bottom" ? 0.35 : 0.12
+         }
+      }
+   }
+
+   Dialog {
+      id: exportDialog
+      objectName: "exportDialog"
+      modal: true
+      width: 400
+      title: exporter.lastPath.length > 0 ? "Экспорт готов" : "Экспорт"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: shell.center_export_dialog()
+      contentItem: ColumnLayout {
+         spacing: 12
+         Text {
+            objectName: "exportDialogText"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Theme.text
+            font.pixelSize: 14
+            text: {
+               if (exporter.lastPath.length > 0) {
+                  return "Файл записан:\n" + exporter.lastPath +
+                     "\n\nЭто вертикальный MP4 1080×1920. Звук — с " +
+                     "дорожки A1. Можно открыть папку exports внутри " +
+                     "библиотеки."
+               }
+               if (exporter.lastError.length > 0) {
+                  return exporter.lastError
+               }
+               return "Экспорт не удался. Выберите ролик с клипами и " +
+                  "нажмите «Экспорт» ещё раз."
+            }
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "exportDialogClose"
+               text: "Закрыть"
+               filled: true
+               onClicked: exportDialog.close()
+            }
          }
       }
    }

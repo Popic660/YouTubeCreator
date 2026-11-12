@@ -1,7 +1,13 @@
 #include "library_store.h"
 
+#include "project_document.h"
+
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QSettings>
 #include <QSqlDatabase>
@@ -14,7 +20,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 constexpr char kPathKey[] = "library/path";
 constexpr char kDraftStatus[] = "draft";
 
@@ -69,6 +75,13 @@ bool CLibraryStore::open(const QString& directory) {
    const int version = read_user_version();
    if (version == 0) {
       if (!create_schema()) {
+         database.close();
+         database = QSqlDatabase();
+         release_connection();
+         return false;
+      }
+   } else if (version == 1) {
+      if (!migrate_from_v1()) {
          database.close();
          database = QSqlDatabase();
          release_connection();
@@ -378,8 +391,63 @@ QString CLibraryStore::short_status(const QString& id) const {
 }
 
 bool CLibraryStore::short_has_poster(const QString& id) const {
-   Q_UNUSED(id)
-   return false;
+   return !short_poster_path(id).isEmpty();
+}
+
+qint64 CLibraryStore::short_duration_ms(const QString& id) const {
+   for (const LibraryShort& clip : shorts()) {
+      if (clip.id == id) {
+         return clip.duration_ms;
+      }
+   }
+   return 0;
+}
+
+QString CLibraryStore::short_poster_path(const QString& id) const {
+   for (const LibraryShort& clip : shorts()) {
+      if (clip.id == id && !clip.poster_relpath.isEmpty()) {
+         const QString path =
+             QDir(root_path_).filePath(clip.poster_relpath);
+         if (QFileInfo::exists(path)) {
+            return path;
+         }
+      }
+   }
+   return {};
+}
+
+bool CLibraryStore::update_short_media(
+    const QString& id, qint64 duration_ms,
+    const QString& poster_relpath) {
+   if (!opened_ || short_name(id).isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "UPDATE shorts SET duration_ms = ?, poster_relpath = ? "
+       "WHERE id = ?");
+   query.addBindValue(duration_ms);
+   query.addBindValue(poster_relpath);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::import_video(const QString& folder_id,
+                                    const QString& path) {
+   CProjectDocument document;
+   document.set_store(this);
+   return document.import_video(folder_id, path);
+}
+
+bool CLibraryStore::import_into_short(const QString& short_id,
+                                      const QString& path) {
+   CProjectDocument document;
+   document.set_store(this);
+   return document.import_into_short(short_id, path);
 }
 
 bool CLibraryStore::rename_short(const QString& id,
@@ -408,6 +476,7 @@ bool CLibraryStore::delete_short(const QString& id, bool confirmed) {
    if (!opened_ || short_name(id).isEmpty() || !confirmed) {
       return false;
    }
+   remove_short_files(id);
    QSqlQuery query(QSqlDatabase::database(connection_name_));
    query.prepare("DELETE FROM shorts WHERE id = ?");
    query.addBindValue(id);
@@ -492,8 +561,8 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
       return result;
    }
    QSqlQuery query(QSqlDatabase::database(connection_name_));
-   if (!query.exec(
-           "SELECT id, folder_id, name, status FROM shorts")) {
+   if (!query.exec("SELECT id, folder_id, name, status, "
+                   "duration_ms, poster_relpath FROM shorts")) {
       return result;
    }
    while (query.next()) {
@@ -502,6 +571,8 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
       clip.folder_id = query.value(1).toString();
       clip.name = query.value(2).toString();
       clip.status = query.value(3).toString();
+      clip.duration_ms = query.value(4).toLongLong();
+      clip.poster_relpath = query.value(5).toString();
       result.push_back(clip);
    }
    return result;
@@ -520,11 +591,13 @@ bool CLibraryStore::create_schema() {
        "CREATE INDEX IF NOT EXISTS folders_name ON folders(name)",
        "CREATE TABLE IF NOT EXISTS shorts ("
        "id TEXT PRIMARY KEY, folder_id TEXT NOT NULL, "
-       "name TEXT NOT NULL, status TEXT NOT NULL)",
+       "name TEXT NOT NULL, status TEXT NOT NULL, "
+       "duration_ms INTEGER NOT NULL DEFAULT 0, "
+       "poster_relpath TEXT NOT NULL DEFAULT '')",
        "CREATE INDEX IF NOT EXISTS shorts_name ON shorts(name)",
        "CREATE INDEX IF NOT EXISTS shorts_folder "
        "ON shorts(folder_id)",
-       "PRAGMA user_version = 1",
+       "PRAGMA user_version = 2",
    };
    for (const QString& statement : statements) {
       if (!query.exec(statement)) {
@@ -533,6 +606,66 @@ bool CLibraryStore::create_schema() {
       }
    }
    return database.commit();
+}
+
+bool CLibraryStore::migrate_from_v1() {
+   QSqlDatabase database = QSqlDatabase::database(connection_name_);
+   QSqlQuery query(database);
+   if (!query.exec("ALTER TABLE shorts ADD COLUMN duration_ms "
+                   "INTEGER NOT NULL DEFAULT 0")) {
+      return false;
+   }
+   if (!query.exec("ALTER TABLE shorts ADD COLUMN poster_relpath "
+                   "TEXT NOT NULL DEFAULT ''")) {
+      return false;
+   }
+   return query.exec("PRAGMA user_version = 2");
+}
+
+void CLibraryStore::remove_short_files(const QString& id) {
+   const QString folder = QDir(root_path_).filePath("shorts/" + id);
+   QStringList assets;
+   const QString json_path = QDir(folder).filePath("project.json");
+   QFile json_file(json_path);
+   if (json_file.open(QIODevice::ReadOnly)) {
+      const QJsonArray clips =
+          QJsonDocument::fromJson(json_file.readAll())
+              .object()
+              .value("clips")
+              .toArray();
+      for (const QJsonValue& value : clips) {
+         const QString rel = value.toObject().value("file").toString();
+         if (!rel.isEmpty()) {
+            assets.append(rel);
+         }
+      }
+   }
+   json_file.close();
+   QFile::remove(json_path);
+   QDir(folder).removeRecursively();
+   for (const QString& rel : assets) {
+      bool used = false;
+      for (const LibraryShort& clip : shorts()) {
+         if (clip.id == id) {
+            continue;
+         }
+         QFile other(QDir(root_path_).filePath(
+             "shorts/" + clip.id + "/project.json"));
+         if (!other.open(QIODevice::ReadOnly)) {
+            continue;
+         }
+         const QString text = QString::fromUtf8(other.readAll());
+         if (text.contains(rel)) {
+            used = true;
+            break;
+         }
+      }
+      if (!used) {
+         const QString abs = QDir(root_path_).filePath(rel);
+         QFile::remove(abs);
+         QDir().rmdir(QFileInfo(abs).absolutePath());
+      }
+   }
 }
 
 int CLibraryStore::read_user_version() const {

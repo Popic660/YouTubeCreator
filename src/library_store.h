@@ -24,6 +24,8 @@ struct LibraryShort {
    QString folder_id;
    QString name;
    QString status;
+   qint64 duration_ms = 0;
+   QString poster_relpath;
 };
 
 /**
@@ -205,9 +207,52 @@ class CLibraryStore : public QObject {
    /**
     * @brief Сообщает, есть ли постер.
     * @param id - id ролика.
-    * @return false: этот этап постер не хранит.
+    * @return true, если файл постера есть.
     */
    Q_INVOKABLE bool short_has_poster(const QString& id) const;
+
+   /**
+    * @brief Длительность ролика.
+    * @param id - id ролика.
+    * @return миллисекунды.
+    */
+   Q_INVOKABLE qint64 short_duration_ms(const QString& id) const;
+
+   /**
+    * @brief Абсолютный путь постера.
+    * @param id - id ролика.
+    * @return путь или пусто.
+    */
+   Q_INVOKABLE QString short_poster_path(const QString& id) const;
+
+   /**
+    * @brief Пишет длительность и постер карточки.
+    * @param id - id ролика.
+    * @param duration_ms - длительность.
+    * @param poster_relpath - путь внутри библиотеки.
+    * @return true, если строка обновлена.
+    */
+   Q_INVOKABLE bool update_short_media(const QString& id,
+                                       qint64 duration_ms,
+                                       const QString& poster_relpath);
+
+   /**
+    * @brief Импортирует видео в папку.
+    * @param folder_id - папка.
+    * @param path - файл.
+    * @return id ролика или пусто.
+    */
+   Q_INVOKABLE QString import_video(const QString& folder_id,
+                                    const QString& path);
+
+   /**
+    * @brief Импортирует видео в черновик.
+    * @param short_id - ролик.
+    * @param path - файл.
+    * @return true, если клип записан.
+    */
+   Q_INVOKABLE bool import_into_short(const QString& short_id,
+                                      const QString& path);
 
    /**
     * @brief Переименовывает ролик.
@@ -274,6 +319,8 @@ class CLibraryStore : public QObject {
 
  private:
    bool create_schema();
+   bool migrate_from_v1();
+   void remove_short_files(const QString& id);
    int read_user_version() const;
    void release_connection();
    bool folder_exists(const QString& id) const;

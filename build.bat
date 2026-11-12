@@ -17,6 +17,21 @@ if not exist "%QTDIR%\bin\windeployqt.exe" (
   exit /b 1
 )
 
+if not defined FFMPEG_ROOT goto :no_ffmpeg
+if "%FFMPEG_ROOT%"=="" goto :no_ffmpeg
+goto :ffmpeg_ok
+:no_ffmpeg
+echo ERROR: FFmpeg shared not found. Set FFMPEG_ROOT, for example:
+echo   set FFMPEG_ROOT=C:\ffmpeg-9.0.2-full_build-shared
+exit /b 1
+:ffmpeg_ok
+if not exist "%FFMPEG_ROOT%\include\libavcodec\avcodec.h" (
+  echo ERROR: FFMPEG_ROOT has no libavcodec headers:
+  echo   %FFMPEG_ROOT%
+  exit /b 1
+)
+for %%I in ("%FFMPEG_ROOT%") do set "FFMPEG_ROOT=%%~sI"
+
 set "VCVARS="
 for %%P in (
   "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
@@ -48,9 +63,10 @@ if not exist "%CTEST_EXE%" set "CTEST_EXE=ctest"
 set "PATH=%QTDIR%\bin;%PATH%"
 echo   Qt      %QTDIR%
 echo   CMake   %CMAKE_EXE%
+echo   FFmpeg  %FFMPEG_ROOT%
 
 echo [2/3] Configure and build Release
-"%CMAKE_EXE%" -S "%ROOT%" -B "%ROOT%\build" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%QTDIR%"
+"%CMAKE_EXE%" -S "%ROOT%" -B "%ROOT%\build" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="%QTDIR%" -DFFMPEG_ROOT="%FFMPEG_ROOT%"
 if errorlevel 1 exit /b 1
 "%CMAKE_EXE%" --build "%ROOT%\build" --target youtube-creator --target shell_tests
 if errorlevel 1 exit /b 1

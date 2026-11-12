@@ -75,10 +75,16 @@ TestCase {
          compare(button.iconColor, "#717171")
          compare(button.height, 40)
          compare(button.radius, 20)
+         verify(button.hint.length > 40)
          button.clicked()
       }
       compare(requireChild(shell, "frameView").centerMode, "empty")
       compare(requireChild(shell, "frameView").hasFrameImage, false)
+      const exportButton = requireChild(shell, "exportButton")
+      compare(exportButton.enabled, false)
+      verify(exportButton.hint.indexOf("Экспорт") >= 0
+         || exportButton.hint.indexOf("MP4") >= 0)
+      verify(findChild(shell, "timelineHelp") !== null)
    }
 
    function test_searchDoesNotFillLibrary() {

@@ -5,7 +5,7 @@
 namespace {
 
 constexpr int kDefaultSide = 240;
-constexpr int kDefaultBottom = 160;
+constexpr int kDefaultBottom = 200;
 constexpr int kMinSide = 160;
 constexpr int kMaxSide = 640;
 constexpr int kMinBottom = 80;

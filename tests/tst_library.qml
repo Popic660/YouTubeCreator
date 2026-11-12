@@ -84,7 +84,7 @@ TestCase {
       const dir = paths.make()
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 1)
+      compare(store.user_version(), 2)
       verify(store.schema_contains("folders"))
       verify(store.schema_contains("shorts"))
       verify(store.schema_contains("folders_name"))
@@ -102,6 +102,20 @@ TestCase {
       const missing = createStore()
       verify(!missing.open(dir + "/missing"))
       verify(!missing.opened)
+      paths.remove_tree(dir)
+   }
+
+   function test_migrateFromV1() {
+      const dir = paths.make()
+      verify(paths.seed_schema_v1(dir))
+      const store = createStore()
+      verify(store.open(dir))
+      compare(store.user_version(), 2)
+      compare(store.folder_name("f1"), "Old")
+      const clip = store.create_short("f1", "Draft")
+      compare(store.short_duration_ms(clip), 0)
+      verify(!store.short_has_poster(clip))
+      store.close()
       paths.remove_tree(dir)
    }
 
