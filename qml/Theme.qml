@@ -25,6 +25,7 @@ QtObject {
    readonly property color outlineStrong: "#3f3f3f"
    readonly property color searchButton: Qt.rgba(1, 1, 1, 0.08)
    readonly property color brand: "#ff0033"
+   readonly property color error: "#ff5577"
    readonly property color badge: Qt.rgba(0, 0, 0, 0.6)
    readonly property color badgeText: "#ffffff"
    readonly property color divider: Qt.rgba(1, 1, 1, 0.2)

@@ -54,6 +54,13 @@ class CTempDirectory : public QObject {
    Q_INVOKABLE bool seed_schema_v2(const QString& directory);
 
    /**
+    * @brief Создаёт library.db схемы 3 с папкой и черновиком.
+    * @param directory - папка библиотеки.
+    * @return true, если файл записан.
+    */
+   Q_INVOKABLE bool seed_schema_v3(const QString& directory);
+
+   /**
     * @brief Пишет PNG-картинку во временную папку.
     * @param directory - каталог.
     * @return путь файла.

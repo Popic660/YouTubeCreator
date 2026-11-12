@@ -108,6 +108,26 @@ TestCase {
       verify(findChild(shell, "notFoundMessage") === null)
    }
 
+   function test_settingsDialogSavesHasKey() {
+      const shell = createShell()
+      const button = requireChild(shell, "settingsButton")
+      compare(button.height, 40)
+      button.clicked()
+      const dialog = requireChild(shell, "settingsDialog")
+      tryVerify(function() { return dialog.visible })
+      compare(requireChild(shell, "settingsDialogSurface").color,
+         "#282828")
+      compare(requireChild(shell, "settingsKeyField").background.radius, 4)
+      const secrets = requireChild(shell, "secretStore")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      requireChild(shell, "settingsKeyField").text = "sk-from-ui"
+      requireChild(shell, "settingsSave").clicked()
+      verify(secrets.hasKey)
+      compare(requireChild(shell, "settingsKeyField").text, "")
+      compare(secrets.apiKey, "")
+   }
+
    function test_brandAndChannels() {
       const shell = createShell()
       const mark = requireChild(shell, "brandMark")

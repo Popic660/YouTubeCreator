@@ -8,6 +8,7 @@ Rectangle {
    property alias query: searchText.text
    property bool exportEnabled: false
    signal exportRequested()
+   signal settingsRequested()
    implicitHeight: Theme.headerHeight
    height: Theme.headerHeight
    color: Theme.canvas
@@ -138,6 +139,33 @@ Rectangle {
          HintTip {
             visible: !exportButton.enabled && exportHover.hovered
             text: exportButton.hint
+         }
+      }
+
+      ToolButton {
+         id: settingsBtn
+         objectName: "settingsButton"
+         Layout.alignment: Qt.AlignVCenter
+         Layout.preferredWidth: Theme.buttonHeight
+         Layout.preferredHeight: Theme.buttonHeight
+         padding: 0
+         hoverEnabled: true
+         background: Rectangle {
+            radius: Theme.buttonRadius
+            color: Theme.faceTonal(settingsBtn.hovered, settingsBtn.down)
+         }
+         contentItem: Glyph {
+            glyphName: "settings"
+            strokeColor: Theme.text
+         }
+         onClicked: header.settingsRequested()
+         HoverHandler {
+            id: settingsHover
+         }
+         HintTip {
+            visible: settingsHover.hovered
+            text: "Ключ и модели чата и голоса. Хранятся в защищённом " +
+               "хранилище Windows, не в библиотеке."
          }
       }
 

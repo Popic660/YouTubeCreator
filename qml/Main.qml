@@ -215,17 +215,65 @@ ApplicationWindow {
       objectName: "previewAudio"
       document: projectDocument
    }
+   CSecretStore {
+      id: secretStore
+      objectName: "secretStore"
+      Component.onCompleted: load()
+   }
+   CHttpTransport {
+      id: httpTransport
+      objectName: "httpTransport"
+   }
+   CPipeline {
+      id: pipeline
+      objectName: "pipeline"
+      store: libraryStore
+      document: projectDocument
+      secrets: secretStore
+      transport: httpTransport
+   }
 
    header: HeaderBar {
       id: headerBar
       exportEnabled: projectDocument.hasClips
       onExportRequested: shell.run_export()
+      onSettingsRequested: shell.open_settings()
    }
 
    function run_export() {
       exporter.export_current()
       center_export_dialog()
       exportDialog.open()
+   }
+
+   function open_settings() {
+      settingsKeyField.text = ""
+      center_settings_dialog()
+      settingsDialog.open()
+   }
+
+   function center_settings_dialog() {
+      const host = shell.contentItem
+      settingsDialog.parent = host
+      Qt.callLater(function() {
+         settingsDialog.x = Math.round(
+            (host.width - settingsDialog.width) / 2)
+         settingsDialog.y = Math.round(
+            (host.height - settingsDialog.height) / 2)
+      })
+   }
+
+   function accept_settings() {
+      secretStore.baseUrl = settingsBaseField.text
+      secretStore.chatModel = settingsChatField.text
+      secretStore.ttsModel = settingsTtsField.text
+      secretStore.voice = settingsVoiceField.text
+      if (settingsKeyField.text.length > 0) {
+         secretStore.apiKey = settingsKeyField.text
+      }
+      secretStore.save()
+      settingsKeyField.text = ""
+      settingsDialog.close()
    }
 
    function center_export_dialog() {
@@ -538,6 +586,7 @@ ApplicationWindow {
       onPanelDragFinished: shell.end_panel_drag()
       store: libraryStore
       libraryModel: libraryModel
+      pipeline: pipeline
       onSelectedIdChanged: shell.apply_selection()
       onSelectedKindChanged: shell.apply_selection()
    }
@@ -710,6 +759,133 @@ ApplicationWindow {
                text: "Закрыть"
                filled: true
                onClicked: exportDialog.close()
+            }
+         }
+      }
+   }
+
+   Dialog {
+      id: settingsDialog
+      objectName: "settingsDialog"
+      modal: true
+      width: 400
+      title: "Модели"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         objectName: "settingsDialogSurface"
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: {
+         settingsBaseField.text = secretStore.baseUrl
+         settingsChatField.text = secretStore.chatModel
+         settingsTtsField.text = secretStore.ttsModel
+         settingsVoiceField.text = secretStore.voice
+         settingsKeyField.text = ""
+         shell.center_settings_dialog()
+      }
+      contentItem: ColumnLayout {
+         spacing: 12
+         TextField {
+            id: settingsBaseField
+            objectName: "settingsBaseField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Адрес API"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsBaseField.activeFocus ? 2 : 1
+               border.color: settingsBaseField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsChatField
+            objectName: "settingsChatField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Модель чата"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsChatField.activeFocus ? 2 : 1
+               border.color: settingsChatField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsTtsField
+            objectName: "settingsTtsField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Модель голоса"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsTtsField.activeFocus ? 2 : 1
+               border.color: settingsTtsField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsVoiceField
+            objectName: "settingsVoiceField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Голос"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsVoiceField.activeFocus ? 2 : 1
+               border.color: settingsVoiceField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsKeyField
+            objectName: "settingsKeyField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            echoMode: TextInput.Password
+            placeholderText: secretStore.hasKey
+               ? "Ключ задан"
+               : "Ключ API"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsKeyField.activeFocus ? 2 : 1
+               border.color: settingsKeyField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "settingsCancel"
+               text: "Отмена"
+               onClicked: settingsDialog.close()
+            }
+            CapsuleButton {
+               objectName: "settingsSave"
+               text: "Сохранить"
+               filled: true
+               onClicked: shell.accept_settings()
             }
          }
       }
