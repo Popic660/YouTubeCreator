@@ -15,6 +15,7 @@ ApplicationWindow {
    readonly property bool channelConnected: false
    readonly property string libraryDock: DockState.libraryDock
    readonly property string timelineDock: DockState.timelineDock
+   readonly property string mediaDock: DockState.mediaDock
    readonly property int leftDockWidth: DockState.leftWidth
    readonly property int rightDockWidth: DockState.rightWidth
    readonly property int bottomDockHeight: DockState.bottomHeight
@@ -38,7 +39,45 @@ ApplicationWindow {
       if (panel === "timeline") {
          DockState.timelineDock = dock
       }
+      if (panel === "media") {
+         DockState.mediaDock = dock
+      }
+      activeTab = panel
       dropTarget = ""
+   }
+
+   function panels_in(dock) {
+      const ids = []
+      if (mediaDock === dock) {
+         ids.push("media")
+      }
+      if (libraryDock === dock) {
+         ids.push("library")
+      }
+      if (timelineDock === dock) {
+         ids.push("timeline")
+      }
+      return ids
+   }
+
+   function panel_title(id) {
+      if (id === "media") {
+         return "Медиа"
+      }
+      if (id === "library") {
+         return "Папки"
+      }
+      return "Таймлайн"
+   }
+
+   function panel_visible(id) {
+      const dock = id === "media" ? mediaDock
+         : id === "library" ? libraryDock : timelineDock
+      const ids = panels_in(dock)
+      if (ids.length <= 1) {
+         return true
+      }
+      return activeTab === id
    }
 
    function show_drop_target(dock) {
@@ -47,6 +86,65 @@ ApplicationWindow {
 
    function clear_drop_target() {
       dropTarget = ""
+   }
+
+   function apply_selection() {
+      const pane = libraryPane
+      if (pane.selectedKind === "short" && pane.selectedId.length > 0) {
+         projectDocument.open_short(pane.selectedId)
+         if (projectDocument.hasRecovery) {
+            center_recovery_dialog()
+            recoveryDialog.open()
+         }
+      } else {
+         projectDocument.close()
+      }
+   }
+
+   function center_recovery_dialog() {
+      const host = shell.contentItem
+      recoveryDialog.parent = host
+      Qt.callLater(function() {
+         recoveryDialog.x = Math.round(
+            (host.width - recoveryDialog.width) / 2)
+         recoveryDialog.y = Math.round(
+            (host.height - recoveryDialog.height) / 2)
+      })
+   }
+
+   function handle_tool(name) {
+      const video = projectDocument.first_clip_on("v1")
+      if (name === "toolSelect") {
+         projectDocument.selectedClipId = video
+      } else if (name === "toolRazor" || name === "opSplit") {
+         const duration = Math.max(projectDocument.durationMs, 1)
+         if (projectDocument.playheadMs <= 0 ||
+             projectDocument.playheadMs >= duration) {
+            projectDocument.playheadMs = Math.floor(duration / 2)
+         }
+         projectDocument.split_at_playhead()
+      } else if (name === "toolHand") {
+         projectDocument.set_transform(
+            video, projectDocument.clip_scale(video),
+            projectDocument.clip_offset_x(video) + 12,
+            projectDocument.clip_offset_y(video))
+      } else if (name === "toolZoom") {
+         projectDocument.set_transform(
+            video, projectDocument.clip_scale(video) * 1.25,
+            projectDocument.clip_offset_x(video),
+            projectDocument.clip_offset_y(video))
+      } else if (name === "opCrop") {
+         projectDocument.apply_cover()
+      } else if (name === "opTransform") {
+         projectDocument.set_transform(video, 1.2, 8, 8)
+      } else if (name === "opVolume") {
+         const audio = projectDocument.first_clip_on("a1")
+         projectDocument.set_volume(audio, 0.4)
+      } else if (name === "opDelete") {
+         projectDocument.delete_selected_clip()
+      } else if (name === "toolText") {
+         projectDocument.add_text("Текст")
+      }
    }
 
    FontLoader {
@@ -95,17 +193,86 @@ ApplicationWindow {
       store: libraryStore
       filter: headerBar.query
    }
+   CMediaModel {
+      id: mediaModel
+      objectName: "mediaModel"
+      store: libraryStore
+      filter: headerBar.query
+   }
+   CProjectDocument {
+      id: projectDocument
+      objectName: "projectDocument"
+      store: libraryStore
+   }
+   CExporter {
+      id: exporter
+      objectName: "exporter"
+      document: projectDocument
+      compositor: frameView.compositor
+   }
+   CPreviewAudio {
+      id: previewAudio
+      objectName: "previewAudio"
+      document: projectDocument
+   }
 
    header: HeaderBar {
       id: headerBar
+      exportEnabled: projectDocument.hasClips
+      onExportRequested: shell.run_export()
+   }
+
+   function run_export() {
+      exporter.export_current()
+      center_export_dialog()
+      exportDialog.open()
+   }
+
+   function center_export_dialog() {
+      const host = shell.contentItem
+      exportDialog.parent = host
+      Qt.callLater(function() {
+         exportDialog.x = Math.round((host.width - exportDialog.width) / 2)
+         exportDialog.y = Math.round(
+            (host.height - exportDialog.height) / 2)
+      })
+   }
+
+   component DockTabChip: Rectangle {
+      id: chip
+      property string panelId: ""
+      property string hostDock: ""
+      visible: (panelId === "media" && shell.mediaDock === hostDock)
+         || (panelId === "library" && shell.libraryDock === hostDock)
+         || (panelId === "timeline" && shell.timelineDock === hostDock)
+      height: 32
+      width: tabLabel.implicitWidth + 16
+      radius: 8
+      color: shell.activeTab === panelId ? Theme.fill : Theme.tonal
+      Text {
+         id: tabLabel
+         anchors.centerIn: parent
+         text: shell.panel_title(chip.panelId)
+         color: shell.activeTab === chip.panelId
+            ? Theme.textInverse : Theme.text
+         font.pixelSize: 14
+         font.weight: 500
+      }
+      MouseArea {
+         anchors.fill: parent
+         onClicked: shell.activeTab = chip.panelId
+      }
    }
 
    component DockBox: Rectangle {
       id: dock
       property string dockName: "right"
       property alias slot: slotItem
-      readonly property bool occupied: shell.libraryDock === dockName
-         || shell.timelineDock === dockName
+      readonly property int panelCount:
+         (shell.mediaDock === dockName ? 1 : 0)
+         + (shell.libraryDock === dockName ? 1 : 0)
+         + (shell.timelineDock === dockName ? 1 : 0)
+      readonly property bool occupied: panelCount > 0
       readonly property bool highlighted: shell.dropTarget === dockName
       objectName: dockName === "left" ? "dockLeft"
          : dockName === "right" ? "dockRight" : "dockBottom"
@@ -113,34 +280,34 @@ ApplicationWindow {
       border.color: highlighted ? Theme.link : "transparent"
       border.width: highlighted ? 2 : 0
 
-      Loader {
-         id: tabLoader
-         active: shell.libraryDock === dock.dockName
-            && shell.timelineDock === dock.dockName
+      Row {
+         id: tabRow
+         objectName: "dockTabs"
+         visible: dock.panelCount > 1
+         height: 32
+         spacing: 4
          z: 2
-         sourceComponent: Row {
-            objectName: "dockTabs"
-            height: 32
-            spacing: 4
-            Button {
-               objectName: "tabLibrary"
-               text: "Папки"
-               height: 32
-               onClicked: shell.activeTab = "library"
-            }
-            Button {
-               objectName: "tabTimeline"
-               text: "Таймлайн"
-               height: 32
-               onClicked: shell.activeTab = "timeline"
-            }
+         DockTabChip {
+            objectName: "tabMedia"
+            panelId: "media"
+            hostDock: dock.dockName
+         }
+         DockTabChip {
+            objectName: "tabLibrary"
+            panelId: "library"
+            hostDock: dock.dockName
+         }
+         DockTabChip {
+            objectName: "tabTimeline"
+            panelId: "timeline"
+            hostDock: dock.dockName
          }
       }
 
       Item {
          id: slotItem
          anchors.fill: parent
-         anchors.topMargin: tabLoader.active ? 32 : 0
+         anchors.topMargin: dock.panelCount > 1 ? 32 : 0
       }
 
       DropArea {
@@ -227,14 +394,46 @@ ApplicationWindow {
             ToolColumn {
                objectName: "toolColumn"
                Layout.alignment: Qt.AlignTop
-               DisabledTool { toolName: "toolSelect" }
-               DisabledTool { toolName: "toolRazor" }
-               DisabledTool { toolName: "toolHand" }
-               DisabledTool { toolName: "toolText" }
-               DisabledTool { toolName: "toolZoom" }
+               DisabledTool {
+                  toolName: "toolSelect"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolRazor"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolHand"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolText"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "toolZoom"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
             }
 
             FrameView {
+               id: frameView
+               document: projectDocument
                Layout.fillWidth: true
                Layout.fillHeight: true
             }
@@ -242,11 +441,41 @@ ApplicationWindow {
             ToolColumn {
                objectName: "operationColumn"
                Layout.alignment: Qt.AlignTop
-               DisabledTool { toolName: "opSplit" }
-               DisabledTool { toolName: "opCrop" }
-               DisabledTool { toolName: "opTransform" }
-               DisabledTool { toolName: "opVolume" }
-               DisabledTool { toolName: "opDelete" }
+               DisabledTool {
+                  toolName: "opSplit"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opCrop"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opTransform"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opVolume"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
+               DisabledTool {
+                  toolName: "opDelete"
+                  toolsEnabled: projectDocument.hasClips
+                  onActivated: function(name) {
+                     shell.handle_tool(name)
+                  }
+               }
             }
          }
 
@@ -285,17 +514,32 @@ ApplicationWindow {
       }
    }
 
+   MediaPane {
+      id: mediaPane
+      parent: shell.mediaDock === "right" ? rightDock.slot
+         : shell.mediaDock === "bottom" ? bottomDock.slot
+         : leftDock.slot
+      anchors.fill: parent
+      visible: shell.panel_visible("media")
+      onPanelDragStarted: shell.start_panel_drag()
+      onPanelDragFinished: shell.end_panel_drag()
+      store: libraryStore
+      mediaModel: mediaModel
+   }
+
    LibraryPane {
+      id: libraryPane
       parent: shell.libraryDock === "left" ? leftDock.slot
          : shell.libraryDock === "bottom" ? bottomDock.slot
          : rightDock.slot
       anchors.fill: parent
-      visible: shell.libraryDock !== shell.timelineDock
-         || shell.activeTab === "library"
+      visible: shell.panel_visible("library")
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
       store: libraryStore
       libraryModel: libraryModel
+      onSelectedIdChanged: shell.apply_selection()
+      onSelectedKindChanged: shell.apply_selection()
    }
 
    TimelineHost {
@@ -303,8 +547,8 @@ ApplicationWindow {
          : shell.timelineDock === "right" ? rightDock.slot
          : bottomDock.slot
       anchors.fill: parent
-      visible: shell.libraryDock !== shell.timelineDock
-         || shell.activeTab === "timeline"
+      visible: shell.panel_visible("timeline")
+      document: projectDocument
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
    }
@@ -369,6 +613,104 @@ ApplicationWindow {
             anchors.fill: parent
             color: Theme.link
             opacity: shell.dropTarget === "bottom" ? 0.35 : 0.12
+         }
+      }
+   }
+
+   Dialog {
+      id: recoveryDialog
+      objectName: "recoveryDialog"
+      modal: true
+      width: 400
+      title: "Восстановление"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: shell.center_recovery_dialog()
+      contentItem: ColumnLayout {
+         spacing: 12
+         Text {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Theme.text
+            font.pixelSize: 14
+            text: "Есть снимок таймлайна после правки. " +
+               "Восстановить его, отложить или отбросить?"
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "recoveryRestore"
+               text: "Восстановить"
+               filled: true
+               onClicked: {
+                  projectDocument.open_short(
+                     libraryPane.selectedId, "restore")
+                  recoveryDialog.close()
+               }
+            }
+            CapsuleButton {
+               objectName: "recoveryDefer"
+               text: "Отложить"
+               onClicked: recoveryDialog.close()
+            }
+            CapsuleButton {
+               objectName: "recoveryDiscard"
+               text: "Отбросить"
+               onClicked: {
+                  projectDocument.open_short(
+                     libraryPane.selectedId, "discard")
+                  recoveryDialog.close()
+               }
+            }
+         }
+      }
+   }
+
+   Dialog {
+      id: exportDialog
+      objectName: "exportDialog"
+      modal: true
+      width: 400
+      title: exporter.lastPath.length > 0 ? "Экспорт готов" : "Экспорт"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: shell.center_export_dialog()
+      contentItem: ColumnLayout {
+         spacing: 12
+         Text {
+            objectName: "exportDialogText"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Theme.text
+            font.pixelSize: 14
+            text: {
+               if (exporter.lastPath.length > 0) {
+                  return "Файл записан:\n" + exporter.lastPath +
+                     "\n\nЭто вертикальный MP4 1080×1920. Звук — с " +
+                     "дорожки A1. Можно открыть папку exports внутри " +
+                     "библиотеки."
+               }
+               if (exporter.lastError.length > 0) {
+                  return exporter.lastError
+               }
+               return "Экспорт не удался. Выберите ролик с клипами и " +
+                  "нажмите «Экспорт» ещё раз."
+            }
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "exportDialogClose"
+               text: "Закрыть"
+               filled: true
+               onClicked: exportDialog.close()
+            }
          }
       }
    }

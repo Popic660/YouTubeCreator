@@ -18,6 +18,7 @@ Rectangle {
    property string confirmShortId: ""
    property string selectedId: ""
    property string selectedKind: ""
+   property string panelId: "library"
    signal panelDragStarted()
    signal panelDragFinished()
 
@@ -125,35 +126,33 @@ Rectangle {
       store.delete_folder(menuFolderId, false)
    }
 
+   function open_short_menu(shortId) {
+      confirmShortId = shortId
+      shortMenu.popup(pane)
+   }
+
+   function begin_delete_short(shortId) {
+      if (store === null || !shortId || shortId.length === 0) {
+         return
+      }
+      confirmShortId = shortId
+      confirmKind = "short"
+      center_dialog(confirmDialog)
+      confirmDialog.open()
+   }
+
    function accept_delete() {
       if (store !== null && confirmKind === "folder") {
          store.delete_folder(menuFolderId, true)
       }
       if (store !== null && confirmKind === "short") {
-         store.delete_short(confirmShortId, true)
+         const id = confirmShortId
+         store.delete_short(id, true)
+         if (selectedId === id) {
+            select_entry("", "")
+         }
       }
       confirmDialog.close()
-   }
-
-   component CapsuleButton: Button {
-      id: capsule
-      property bool filled: false
-      implicitHeight: Theme.buttonHeight
-      leftPadding: 16
-      rightPadding: 16
-      font.pixelSize: Theme.buttonTextSize
-      font.weight: 500
-      background: Rectangle {
-         radius: Theme.buttonRadius
-         color: capsule.filled ? Theme.fill : Theme.tonal
-      }
-      contentItem: Text {
-         text: capsule.text
-         color: capsule.filled ? Theme.textInverse : Theme.text
-         font: capsule.font
-         horizontalAlignment: Text.AlignHCenter
-         verticalAlignment: Text.AlignVCenter
-      }
    }
 
    component LibraryMenuItem: MenuItem {
@@ -182,6 +181,9 @@ Rectangle {
          visible: !pane.libraryOpen
          text: "Выбрать папку"
          filled: true
+         hint: "Укажите папку на диске, где будут храниться ролики, " +
+            "исходники и экспорты. Это корень библиотеки. Потом сюда " +
+            "же можно вернуться через «Сменить папку»."
          onClicked: folderDialog.open()
       }
 
@@ -198,6 +200,8 @@ Rectangle {
          objectName: "changeLibraryButton"
          visible: pane.libraryOpen
          text: "Сменить папку"
+         hint: "Открыть другую папку библиотеки. Текущие ролики не " +
+            "удаляются — просто закрывается это дерево."
          onClicked: folderDialog.open()
       }
 
@@ -205,45 +209,31 @@ Rectangle {
          objectName: "createRootButton"
          visible: pane.libraryOpen
          text: "Создать папку"
+         hint: "Новая папка в корне дерева. Внутри папки через «⋯»: " +
+            "ещё папка или черновик ролика."
          onClicked: pane.open_name_dialog("createRoot", "")
       }
 
-      Item {
+      PanelChrome {
          id: libraryDragHandle
          objectName: "libraryDragHandle"
-         property string panelId: "library"
+         panelId: "library"
+         title: "Папки"
+         glyphName: "folder"
          Layout.fillWidth: true
-         Layout.preferredHeight: 32
-         Rectangle {
-            anchors.fill: parent
-            color: Theme.menu
-         }
-         Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: 8
-            text: "Папки"
-            color: Theme.text
-            font.pixelSize: 12
-         }
-         Item {
-            id: libraryProxy
-            width: 1
-            height: 1
-            Drag.keys: ["panel"]
-            Drag.source: libraryDragHandle
-            Drag.active: libraryPress.drag.active
-            Drag.hotSpot.x: libraryPress.mouseX
-            Drag.hotSpot.y: libraryPress.mouseY
-         }
-         MouseArea {
-            id: libraryPress
-            anchors.fill: parent
-            drag.target: libraryProxy
-            drag.threshold: 4
-            cursorShape: Qt.SizeAllCursor
-            onPressed: pane.panelDragStarted()
-            onReleased: pane.panelDragFinished()
+         onPanelDragStarted: pane.panelDragStarted()
+         onPanelDragFinished: pane.panelDragFinished()
+         extra: CapsuleButton {
+            id: deleteShortButton
+            objectName: "deleteShortButton"
+            visible: pane.selectedKind === "short"
+               && pane.selectedId.length > 0
+            implicitHeight: 32
+            text: "Удалить"
+            hint: "Удалить выбранный ролик из папки. Появится вопрос; " +
+               "«Отмена» ничего не трогает. То же действие — правая " +
+               "кнопка мыши по превью ролика."
+            onClicked: pane.begin_delete_short(pane.selectedId)
          }
       }
 
@@ -286,8 +276,11 @@ Rectangle {
             readonly property int depth: model.depth
             readonly property bool expanded: model.expanded
             readonly property bool hasChildren: model.hasChildren
+            readonly property bool hasPoster: !!model.hasPoster
+            readonly property string posterPath: model.posterPath || ""
+            readonly property int durationMs: model.durationMs || 0
             width: rowColumn.width
-            height: kind === "folder" ? 40 : shortCard.implicitHeight
+            height: kind === "folder" ? 40 : 40 + shortCard.implicitHeight
 
             Item {
                id: ghost
@@ -306,55 +299,57 @@ Rectangle {
                radius: 10
                visible: kind === "folder"
                color: pane.selectedId === row.entryId
-                  ? Theme.selected : "transparent"
+                  ? Theme.tonal : "transparent"
             }
 
             Repeater {
                model: row.depth
                Rectangle {
                   objectName: "nestLine"
-                  x: 8 + index * 12
+                  x: 8 + index * 16
                   y: 0
                   width: 1
                   height: row.height
-                  color: Theme.outline
+                  color: Theme.textDisabled
                }
             }
 
             Glyph {
                objectName: "folderGlyph"
                visible: kind === "folder"
-               x: row.depth * 12
-               width: 16
-               height: 16
-               anchors.verticalCenter: parent.verticalCenter
+               x: 8 + row.depth * 16
+               y: 8
+               width: 24
+               height: 24
                glyphName: "folder"
                strokeColor: Theme.text
             }
 
+            Glyph {
+               objectName: "shortGlyph"
+               visible: kind === "short"
+               x: 8 + row.depth * 16
+               y: 8
+               width: 24
+               height: 24
+               glyphName: "short"
+               strokeColor: Theme.text
+            }
+
             Row {
-               x: row.depth * 12 + (kind === "folder" ? 20 : 0)
+               x: 8 + row.depth * 16 + 24
                width: parent.width - x
                height: kind === "folder" ? 40 : implicitHeight
                spacing: 4
 
-               Shape {
+               Glyph {
                   visible: kind === "folder" && row.hasChildren
-                  width: 16
-                  height: 16
+                  width: 18
+                  height: 18
                   anchors.verticalCenter: parent.verticalCenter
-                  ShapePath {
-                     strokeColor: Theme.textSecondary
-                     strokeWidth: 2
-                     fillColor: "transparent"
-                     capStyle: ShapePath.RoundCap
-                     joinStyle: ShapePath.RoundJoin
-                     PathSvg {
-                        path: row.expanded
-                           ? "M6 9 L12 15 L18 9"
-                           : "M9 6 L15 12 L9 18"
-                     }
-                  }
+                  glyphName: row.expanded ? "chevronDown"
+                                          : "chevronRight"
+                  strokeColor: Theme.textDisabled
                }
 
                Text {
@@ -376,10 +371,51 @@ Rectangle {
                   spacing: 4
                   Rectangle {
                      objectName: "shortPlaceholder"
+                     visible: !row.hasPoster
                      width: 72
                      height: 128
                      radius: 12
                      color: Theme.raised
+                  }
+                  Image {
+                     objectName: row.hasPoster ? "shortPreview" : ""
+                     visible: row.hasPoster
+                     width: 72
+                     height: 128
+                     source: row.hasPoster
+                        ? "file:///" + String(row.posterPath).replace(/\\/g, "/")
+                        : ""
+                     fillMode: Image.PreserveAspectCrop
+                     Loader {
+                        active: row.hasPoster
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: 4
+                        sourceComponent: Rectangle {
+                           objectName: "durationBadge"
+                           height: 20
+                           width: badgeText.implicitWidth + 8
+                           radius: 4
+                           color: Theme.badge
+                           Text {
+                              id: badgeText
+                              objectName: "durationText"
+                              anchors.centerIn: parent
+                              text: {
+                                 const total = Math.floor(
+                                    row.durationMs / 1000)
+                                 const minutes = Math.floor(total / 60)
+                                 const seconds = total % 60
+                                 return minutes + ":"
+                                    + (seconds < 10 ? "0" : "")
+                                    + seconds
+                              }
+                              color: Theme.badgeText
+                              font.pixelSize: 12
+                              font.weight: 500
+                           }
+                        }
+                     }
                   }
                   Text {
                      objectName: "shortTitle"
@@ -399,13 +435,22 @@ Rectangle {
                id: dragArea
                anchors.fill: parent
                anchors.rightMargin: kind === "folder" ? 40 : 0
+               acceptedButtons: Qt.LeftButton | Qt.RightButton
                drag.target: ghost
                drag.threshold: 12
-               onClicked: {
+               onClicked: function(mouse) {
+                  pane.select_entry(row.entryId, row.kind)
+                  if (mouse.button === Qt.RightButton) {
+                     if (row.kind === "short") {
+                        pane.open_short_menu(row.entryId)
+                     } else {
+                        pane.open_menu(row.entryId)
+                     }
+                     return
+                  }
                   if (row.kind === "folder") {
                      pane.libraryModel.toggle_id(row.entryId)
                   }
-                  pane.select_entry(row.entryId, row.kind)
                }
             }
 
@@ -423,6 +468,7 @@ Rectangle {
             }
 
             ToolButton {
+               id: folderMenuButton
                objectName: "folderMenuButton"
                visible: kind === "folder"
                anchors.right: parent.right
@@ -430,10 +476,12 @@ Rectangle {
                width: Theme.buttonHeight
                height: Theme.buttonHeight
                padding: 0
+               hoverEnabled: true
                onClicked: pane.open_menu(row.entryId)
                background: Rectangle {
                   radius: Theme.buttonRadius
-                  color: Theme.tonal
+                  color: Theme.faceTonal(
+                     folderMenuButton.hovered, folderMenuButton.down)
                }
                contentItem: Text {
                   text: "..."
@@ -441,6 +489,11 @@ Rectangle {
                   font.pixelSize: 14
                   horizontalAlignment: Text.AlignHCenter
                   verticalAlignment: Text.AlignVCenter
+               }
+               HintTip {
+                  visible: folderMenuButton.hovered
+                  text: "Меню папки: создать вложенную папку, черновик, " +
+                     "переименовать, удалить папку, промпт."
                }
             }
          }
@@ -454,6 +507,24 @@ Rectangle {
       title: "Папка библиотеки"
       onAccepted: pane.apply_library_folder(selectedFolder)
       onRejected: pane.decline_library_folder()
+   }
+
+   Menu {
+      id: shortMenu
+      objectName: "shortMenu"
+      padding: 8
+      background: Rectangle {
+         objectName: "shortMenuSurface"
+         color: Theme.menu
+         radius: 12
+         implicitWidth: 240
+         implicitHeight: 56
+      }
+      LibraryMenuItem {
+         objectName: "menuDeleteShort"
+         text: "Удалить ролик"
+         onTriggered: pane.begin_delete_short(pane.confirmShortId)
+      }
    }
 
    Menu {
@@ -612,7 +683,12 @@ Rectangle {
       contentItem: ColumnLayout {
          spacing: 12
          Text {
-            text: "Удалить вместе с роликами?"
+            objectName: "confirmMessage"
+            text: confirmKind === "short"
+               ? "Удалить ролик из папки? Монтаж и копия файла " +
+                 "пропадут. Отмена ничего не удалит."
+               : "Удалить папку вместе с роликами внутри? Отмена " +
+                 "ничего не удалит."
             color: Theme.text
             font.pixelSize: 14
             wrapMode: Text.WordWrap
@@ -623,12 +699,14 @@ Rectangle {
             CapsuleButton {
                objectName: "confirmCancel"
                text: "Отмена"
+               hint: "Закрыть окно. Ничего не удалится."
                onClicked: confirmDialog.close()
             }
             CapsuleButton {
                objectName: "confirmAccept"
                text: "Удалить"
                filled: true
+               hint: "Да, удалить. Это нельзя отменить из программы."
                onClicked: pane.accept_delete()
             }
          }

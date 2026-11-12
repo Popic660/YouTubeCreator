@@ -38,7 +38,17 @@ Item {
          "opDelete": "M10 11v6 M14 11v6 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 M3 6h18 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
          "channelMenu": "M2 12 A10 10 0 1 1 22 12 A10 10 0 1 1 2 12 M9 10 A3 3 0 1 1 15 10 A3 3 0 1 1 9 10 M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662",
          "search": "M11 11 A6.5 6.5 0 1 1 11 11.01 M21 21 L16.65 16.65",
-         "folder": "M4 6 H10 L12 8 H20 V18 H4 Z"
+         "folder": "M3 7 V19 H21 V9 H12 L10 7 Z M3 7 H9 L11 9",
+         "chevronRight": "M9 6 L15 12 L9 18",
+         "chevronDown": "M6 9 L12 15 L18 9",
+         "film": "M7 4 H17 V20 H7 Z M7 8 H17 M7 16 H17 M4 8 H7 M4 16 H7 M17 8 H20 M17 16 H20",
+         "short": "M5 6 H15 V18 H5 Z M15 10 L20 7 V17 L15 14",
+         "audio": "M11 5 L6 9 H3 V15 H6 L11 19 Z M15.5 8.5 A4.5 4.5 0 0 1 15.5 15.5",
+         "image": "M4 5 H20 V19 H4 Z M8 9 A1.5 1.5 0 1 1 8 9.01 M4 15 L9 10 L13 14 L16 11 L20 15",
+         "bin": "M4 7 H20 V10 H4 Z M6 10 V18 H18 V10 M10 13 H14",
+         "magnet": "M7 4 V13 A5 5 0 0 0 17 13 V4 M7 4 H10 V13 A2 2 0 0 0 14 13 V4 H17",
+         "play": "M8 5 L19 12 L8 19 Z",
+         "pause": "M7 4 L7 20 M17 4 L17 20"
       }
       return paths[name] || ""
    }

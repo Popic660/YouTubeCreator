@@ -75,10 +75,16 @@ TestCase {
          compare(button.iconColor, "#717171")
          compare(button.height, 40)
          compare(button.radius, 20)
+         verify(button.hint.length > 40)
          button.clicked()
       }
       compare(requireChild(shell, "frameView").centerMode, "empty")
       compare(requireChild(shell, "frameView").hasFrameImage, false)
+      const exportButton = requireChild(shell, "exportButton")
+      compare(exportButton.enabled, false)
+      verify(exportButton.hint.indexOf("Экспорт") >= 0
+         || exportButton.hint.indexOf("MP4") >= 0)
+      verify(findChild(shell, "timelineHelp") !== null)
    }
 
    function test_searchDoesNotFillLibrary() {
@@ -145,6 +151,21 @@ TestCase {
          verify(again.y + again.height > area.y)
          verify(again.y < area.y + area.height)
       }
+   }
+
+   function test_defaultDocksAndChrome() {
+      DockState.reset_layout()
+      const shell = createShell()
+      compare(DockState.mediaDock, "left")
+      compare(DockState.libraryDock, "right")
+      compare(DockState.timelineDock, "bottom")
+      compare(requireChild(shell, "libraryChromeTitle").text, "Папки")
+      compare(requireChild(shell, "mediaChromeTitle").text, "Медиа")
+      compare(requireChild(shell, "frameView").centerMode, "empty")
+      verify(findChild(shell, "mediaPane") !== null)
+      verify(findChild(shell, "libraryPane") !== null)
+      verify(findChild(shell, "timelineHost") !== null)
+      verify(findChild(shell, "toolColumn") !== null)
    }
 
    function test_distinctGlyphs() {

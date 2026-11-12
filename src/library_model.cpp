@@ -93,6 +93,12 @@ QVariant CLibraryModel::data(const QModelIndex& index,
          return row->expanded;
       case kHasChildrenRole:
          return row->has_children;
+      case kDurationRole:
+         return row->duration_ms;
+      case kPosterRole:
+         return row->poster_path;
+      case kHasPosterRole:
+         return row->has_poster;
       default:
          return {};
    }
@@ -106,6 +112,9 @@ QHash<int, QByteArray> CLibraryModel::roleNames() const {
        {kDepthRole, "depth"},
        {kExpandedRole, "expanded"},
        {kHasChildrenRole, "hasChildren"},
+       {kDurationRole, "durationMs"},
+       {kPosterRole, "posterPath"},
+       {kHasPosterRole, "hasPoster"},
    };
 }
 
@@ -293,6 +302,15 @@ void CLibraryModel::rebuild() {
          clip_row.kind = "short";
          clip_row.name = child.name;
          clip_row.depth = depth + 1;
+         for (const LibraryShort& clip : clips) {
+            if (clip.id == child.id) {
+               clip_row.duration_ms = clip.duration_ms;
+               clip_row.poster_path =
+                   store_->short_poster_path(clip.id);
+               clip_row.has_poster = !clip_row.poster_path.isEmpty();
+               break;
+            }
+         }
          rows_.push_back(clip_row);
       }
    };

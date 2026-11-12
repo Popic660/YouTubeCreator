@@ -25,6 +25,8 @@ QtObject {
    readonly property color outlineStrong: "#3f3f3f"
    readonly property color searchButton: Qt.rgba(1, 1, 1, 0.08)
    readonly property color brand: "#ff0033"
+   readonly property color badge: Qt.rgba(0, 0, 0, 0.6)
+   readonly property color badgeText: "#ffffff"
    readonly property color divider: Qt.rgba(1, 1, 1, 0.2)
 
    readonly property int headerHeight: 56
@@ -36,5 +38,20 @@ QtObject {
    readonly property int searchCornerRadius: 40
    readonly property int iconSize: 24
    readonly property int libraryWidth: 240
-   readonly property int timelineHeight: 160
+   readonly property int timelineHeight: 200
+
+   function faceTonal(hovered, down) {
+      return (hovered || down) ? tonalHover : tonal
+   }
+
+   function faceFill(hovered, down) {
+      return (hovered || down) ? fillHover : fill
+   }
+
+   function formatClock(ms) {
+      const total = Math.max(0, Math.floor(ms / 1000))
+      const minutes = Math.floor(total / 60)
+      const seconds = total % 60
+      return minutes + ":" + (seconds < 10 ? "0" : "") + seconds
+   }
 }

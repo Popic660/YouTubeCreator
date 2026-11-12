@@ -128,6 +128,9 @@ class CLibraryModel : public QAbstractListModel {
       kDepthRole,
       kExpandedRole,
       kHasChildrenRole,
+      kDurationRole,
+      kPosterRole,
+      kHasPosterRole,
    };
 
    struct Row {
@@ -137,6 +140,9 @@ class CLibraryModel : public QAbstractListModel {
       int depth = 0;
       bool expanded = false;
       bool has_children = false;
+      qint64 duration_ms = 0;
+      QString poster_path;
+      bool has_poster = false;
    };
 
    void reload();
