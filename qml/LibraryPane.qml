@@ -9,6 +9,7 @@ Rectangle {
    objectName: "libraryPane"
    property CLibraryStore store: null
    property CLibraryModel libraryModel: null
+   property CPipeline pipeline: null
    readonly property int rowCount: libraryModel ? libraryModel.count : 0
    readonly property bool libraryOpen: store !== null && store.opened
 
@@ -129,6 +130,31 @@ Rectangle {
    function open_short_menu(shortId) {
       confirmShortId = shortId
       shortMenu.popup(pane)
+   }
+
+   function open_topic_dialog() {
+      if (store === null || confirmShortId.length === 0) {
+         return
+      }
+      topicField.text = store.short_topic(confirmShortId)
+      center_dialog(topicDialog)
+      topicDialog.open()
+   }
+
+   function accept_topic() {
+      if (store === null) {
+         topicDialog.close()
+         return
+      }
+      store.set_topic(confirmShortId, topicField.text)
+      if (topicField.text.trim().length === 0) {
+         topicDialog.close()
+         return
+      }
+      if (pipeline !== null) {
+         pipeline.run(confirmShortId)
+      }
+      topicDialog.close()
    }
 
    function begin_delete_short(shortId) {
@@ -428,6 +454,82 @@ Rectangle {
                      maximumLineCount: 2
                      elide: Text.ElideRight
                   }
+                  Loader {
+                     active: kind === "short"
+                     width: 96
+                     sourceComponent: Column {
+                        id: pipelineStatus
+                        objectName: "pipelineStatus"
+                        width: 96
+                        spacing: 4
+                        visible: pane.store !== null && (
+                           (pane.pipeline &&
+                              pane.pipeline.activeShortId ===
+                                 row.entryId &&
+                              (pane.pipeline.running ||
+                               pane.pipeline.lastError.length > 0)) ||
+                           pane.store.task_status(row.entryId) ===
+                              "interrupted" ||
+                           pane.store.task_status(row.entryId) ===
+                              "error")
+                        Text {
+                           objectName: "pipelineStep"
+                           width: parent.width
+                           color: Theme.textSecondary
+                           font.pixelSize: 12
+                           wrapMode: Text.WordWrap
+                           text: pane.pipeline &&
+                              pane.pipeline.activeShortId ===
+                                 row.entryId
+                              ? pane.pipeline.currentStep
+                              : pane.store.task_step(row.entryId)
+                        }
+                        Text {
+                           objectName: "pipelineProgress"
+                           width: parent.width
+                           color: Theme.textSecondary
+                           font.pixelSize: 12
+                           text: String(pane.pipeline &&
+                              pane.pipeline.activeShortId ===
+                                 row.entryId
+                              ? pane.pipeline.progress
+                              : pane.store.task_progress(
+                                 row.entryId))
+                        }
+                        Text {
+                           objectName: "pipelineError"
+                           width: parent.width
+                           visible: text.length > 0
+                           color: Theme.error
+                           font.pixelSize: 12
+                           wrapMode: Text.WordWrap
+                           text: pane.pipeline &&
+                              pane.pipeline.activeShortId ===
+                                 row.entryId &&
+                              pane.pipeline.lastError.length > 0
+                              ? pane.pipeline.lastError
+                              : pane.store.task_error(row.entryId)
+                        }
+                        CapsuleButton {
+                           objectName: "pipelineCancel"
+                           visible: pane.pipeline &&
+                              pane.pipeline.running &&
+                              pane.pipeline.activeShortId ===
+                                 row.entryId
+                           text: "Отмена"
+                           onClicked: pane.pipeline.cancel()
+                        }
+                        CapsuleButton {
+                           objectName: "pipelineRetry"
+                           text: "Повтор"
+                           onClicked: {
+                              if (pane.pipeline) {
+                                 pane.pipeline.retry(row.entryId)
+                              }
+                           }
+                        }
+                     }
+                  }
                }
             }
 
@@ -518,7 +620,12 @@ Rectangle {
          color: Theme.menu
          radius: 12
          implicitWidth: 240
-         implicitHeight: 56
+         implicitHeight: 100
+      }
+      LibraryMenuItem {
+         objectName: "menuTopicVoice"
+         text: "Тема и голос"
+         onTriggered: pane.open_topic_dialog()
       }
       LibraryMenuItem {
          objectName: "menuDeleteShort"
@@ -663,6 +770,53 @@ Rectangle {
                text: "Готово"
                filled: true
                onClicked: pane.accept_prompt()
+            }
+         }
+      }
+   }
+
+   Dialog {
+      id: topicDialog
+      objectName: "topicDialog"
+      modal: true
+      width: 320
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: pane.center_dialog(this)
+      contentItem: ColumnLayout {
+         spacing: 12
+         TextField {
+            id: topicField
+            objectName: "topicField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Тема ролика"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: topicField.activeFocus ? 2 : 1
+               border.color: topicField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "topicCancel"
+               text: "Отмена"
+               onClicked: topicDialog.close()
+            }
+            CapsuleButton {
+               objectName: "topicGenerate"
+               text: "Сгенерировать"
+               filled: true
+               onClicked: pane.accept_topic()
             }
          }
       }

@@ -3,6 +3,7 @@
 #include "media_io.h"
 #include "project_document.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -24,7 +25,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 constexpr char kPathKey[] = "library/path";
 constexpr char kDraftStatus[] = "draft";
 constexpr char kRootBinId[] = "root";
@@ -85,11 +86,17 @@ bool CLibraryStore::open(const QString& directory) {
    if (version == 0) {
       migrated = create_schema();
    } else if (version == 1) {
-      migrated = migrate_from_v1() && migrate_from_v2();
+      migrated = migrate_from_v1() && migrate_from_v2() &&
+                 migrate_from_v3();
    } else if (version == 2) {
-      migrated = migrate_from_v2();
+      migrated = migrate_from_v2() && migrate_from_v3();
+   } else if (version == 3) {
+      migrated = migrate_from_v3();
    } else if (version != kSchemaVersion) {
       migrated = false;
+   }
+   if (migrated) {
+      interrupt_running_tasks();
    }
    if (!migrated) {
       opened_ = false;
@@ -395,6 +402,158 @@ QString CLibraryStore::short_status(const QString& id) const {
    return {};
 }
 
+QString CLibraryStore::short_topic(const QString& id) const {
+   for (const LibraryShort& clip : shorts()) {
+      if (clip.id == id) {
+         return clip.topic;
+      }
+   }
+   return {};
+}
+
+bool CLibraryStore::set_topic(const QString& id,
+                              const QString& topic) {
+   if (!opened_ || short_name(id).isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("UPDATE shorts SET topic = ? WHERE id = ?");
+   query.addBindValue(topic);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::short_script(const QString& id) const {
+   for (const LibraryShort& clip : shorts()) {
+      if (clip.id == id) {
+         return clip.script;
+      }
+   }
+   return {};
+}
+
+bool CLibraryStore::set_script(const QString& id,
+                               const QString& script) {
+   if (!opened_ || short_name(id).isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("UPDATE shorts SET script = ? WHERE id = ?");
+   query.addBindValue(script);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+bool CLibraryStore::set_short_status(const QString& id,
+                                     const QString& status) {
+   if (!opened_ || short_name(id).isEmpty() || status.isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("UPDATE shorts SET status = ? WHERE id = ?");
+   query.addBindValue(status);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::start_task(const QString& short_id,
+                                  const QString& step) {
+   return insert_task(short_id, step, QStringLiteral("running"));
+}
+
+QString CLibraryStore::insert_task(const QString& short_id,
+                                   const QString& step,
+                                   const QString& status) {
+   if (!opened_ || short_name(short_id).isEmpty() || step.isEmpty() ||
+       status.isEmpty()) {
+      return {};
+   }
+   const QString id =
+       QUuid::createUuid().toString(QUuid::WithoutBraces);
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "INSERT INTO tasks (id, short_id, step, status, progress, "
+       "error, created_ms) VALUES (?, ?, ?, ?, 0, '', ?)");
+   query.addBindValue(id);
+   query.addBindValue(short_id);
+   query.addBindValue(step);
+   query.addBindValue(status);
+   query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+   if (!query.exec()) {
+      return {};
+   }
+   notify_changed();
+   return id;
+}
+
+bool CLibraryStore::update_task(const QString& id, const QString& step,
+                                const QString& status, int progress,
+                                const QString& error) {
+   if (!opened_ || id.isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "UPDATE tasks SET step = ?, status = ?, progress = ?, "
+       "error = ? WHERE id = ?");
+   query.addBindValue(step);
+   query.addBindValue(status);
+   query.addBindValue(progress);
+   query.addBindValue(error);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::latest_task_field(const QString& short_id,
+                                         const QString& field) const {
+   if (!opened_) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       QStringLiteral("SELECT %1 FROM tasks WHERE short_id = ? "
+                      "ORDER BY created_ms DESC LIMIT 1")
+           .arg(field));
+   query.addBindValue(short_id);
+   if (!query.exec() || !query.next()) {
+      return {};
+   }
+   return query.value(0).toString();
+}
+
+QString CLibraryStore::task_status(const QString& short_id) const {
+   return latest_task_field(short_id, QStringLiteral("status"));
+}
+
+QString CLibraryStore::task_step(const QString& short_id) const {
+   return latest_task_field(short_id, QStringLiteral("step"));
+}
+
+int CLibraryStore::task_progress(const QString& short_id) const {
+   return latest_task_field(short_id, QStringLiteral("progress"))
+       .toInt();
+}
+
+QString CLibraryStore::task_error(const QString& short_id) const {
+   return latest_task_field(short_id, QStringLiteral("error"));
+}
+
 bool CLibraryStore::short_has_poster(const QString& id) const {
    return !short_poster_path(id).isEmpty();
 }
@@ -567,7 +726,8 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
    }
    QSqlQuery query(QSqlDatabase::database(connection_name_));
    if (!query.exec("SELECT id, folder_id, name, status, "
-                   "duration_ms, poster_relpath FROM shorts")) {
+                   "duration_ms, poster_relpath, topic, script "
+                   "FROM shorts")) {
       return result;
    }
    while (query.next()) {
@@ -578,6 +738,8 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
       clip.status = query.value(3).toString();
       clip.duration_ms = query.value(4).toLongLong();
       clip.poster_relpath = query.value(5).toString();
+      clip.topic = query.value(6).toString();
+      clip.script = query.value(7).toString();
       result.push_back(clip);
    }
    return result;
@@ -1095,7 +1257,9 @@ bool CLibraryStore::create_schema() {
        "id TEXT PRIMARY KEY, folder_id TEXT NOT NULL, "
        "name TEXT NOT NULL, status TEXT NOT NULL, "
        "duration_ms INTEGER NOT NULL DEFAULT 0, "
-       "poster_relpath TEXT NOT NULL DEFAULT '')",
+       "poster_relpath TEXT NOT NULL DEFAULT '', "
+       "topic TEXT NOT NULL DEFAULT '', "
+       "script TEXT NOT NULL DEFAULT '')",
        "CREATE INDEX IF NOT EXISTS shorts_name ON shorts(name)",
        "CREATE INDEX IF NOT EXISTS shorts_folder "
        "ON shorts(folder_id)",
@@ -1115,9 +1279,16 @@ bool CLibraryStore::create_schema() {
        "CREATE INDEX IF NOT EXISTS assets_bin ON assets(bin_id)",
        "CREATE INDEX IF NOT EXISTS assets_fp "
        "ON assets(fingerprint)",
+       "CREATE TABLE IF NOT EXISTS tasks ("
+       "id TEXT PRIMARY KEY, short_id TEXT NOT NULL, "
+       "step TEXT NOT NULL, status TEXT NOT NULL, "
+       "progress INTEGER NOT NULL DEFAULT 0, "
+       "error TEXT NOT NULL DEFAULT '', "
+       "created_ms INTEGER NOT NULL DEFAULT 0)",
+       "CREATE INDEX IF NOT EXISTS tasks_short ON tasks(short_id)",
        "INSERT OR IGNORE INTO bins(id, parent_id, name) "
        "VALUES('root', NULL, 'Медиа')",
-       "PRAGMA user_version = 3",
+       "PRAGMA user_version = 4",
    };
    for (const QString& statement : statements) {
       if (!query.exec(statement)) {
@@ -1151,6 +1322,45 @@ bool CLibraryStore::migrate_from_v2() {
    }
    QSqlQuery query(QSqlDatabase::database(connection_name_));
    return query.exec("PRAGMA user_version = 3");
+}
+
+bool CLibraryStore::migrate_from_v3() {
+   QSqlDatabase database = QSqlDatabase::database(connection_name_);
+   QSqlQuery query(database);
+   if (!query.exec("ALTER TABLE shorts ADD COLUMN topic "
+                   "TEXT NOT NULL DEFAULT ''")) {
+      return false;
+   }
+   if (!query.exec("ALTER TABLE shorts ADD COLUMN script "
+                   "TEXT NOT NULL DEFAULT ''")) {
+      return false;
+   }
+   if (!query.exec("CREATE TABLE IF NOT EXISTS tasks ("
+                   "id TEXT PRIMARY KEY, short_id TEXT NOT NULL, "
+                   "step TEXT NOT NULL, status TEXT NOT NULL, "
+                   "progress INTEGER NOT NULL DEFAULT 0, "
+                   "error TEXT NOT NULL DEFAULT '', "
+                   "created_ms INTEGER NOT NULL DEFAULT 0)")) {
+      return false;
+   }
+   if (!query.exec("CREATE INDEX IF NOT EXISTS tasks_short "
+                   "ON tasks(short_id)")) {
+      return false;
+   }
+   return query.exec("PRAGMA user_version = 4");
+}
+
+bool CLibraryStore::interrupt_running_tasks() {
+   if (!opened_ || !schema_contains(QStringLiteral("tasks"))) {
+      return true;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   if (!query.exec("UPDATE tasks SET status = 'interrupted' "
+                   "WHERE status = 'running'")) {
+      return false;
+   }
+   return query.exec("UPDATE shorts SET status = 'draft' "
+                     "WHERE status = 'generating'");
 }
 
 bool CLibraryStore::ensure_pool_tables() {

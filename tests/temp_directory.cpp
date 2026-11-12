@@ -141,6 +141,54 @@ bool CTempDirectory::seed_schema_v2(const QString& directory) {
                          QJsonDocument(root).toJson()));
 }
 
+bool CTempDirectory::seed_schema_v3(const QString& directory) {
+   if (!QDir().mkpath(directory)) {
+      return false;
+   }
+   const QString name =
+       QUuid::createUuid().toString(QUuid::WithoutBraces);
+   QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE", name);
+   database.setDatabaseName(QDir(directory).filePath("library.db"));
+   if (!database.open()) {
+      QSqlDatabase::removeDatabase(name);
+      return false;
+   }
+   QSqlQuery query(database);
+   const bool ok =
+       query.exec("CREATE TABLE folders ("
+                  "id TEXT PRIMARY KEY, parent_id TEXT, "
+                  "name TEXT NOT NULL, prompt TEXT NOT NULL "
+                  "DEFAULT '')") &&
+       query.exec("CREATE TABLE shorts ("
+                  "id TEXT PRIMARY KEY, folder_id TEXT NOT NULL, "
+                  "name TEXT NOT NULL, status TEXT NOT NULL, "
+                  "duration_ms INTEGER NOT NULL DEFAULT 0, "
+                  "poster_relpath TEXT NOT NULL DEFAULT '')") &&
+       query.exec("CREATE TABLE bins ("
+                  "id TEXT PRIMARY KEY, parent_id TEXT, "
+                  "name TEXT NOT NULL)") &&
+       query.exec("CREATE TABLE assets ("
+                  "id TEXT PRIMARY KEY, bin_id TEXT NOT NULL, "
+                  "name TEXT NOT NULL, kind TEXT NOT NULL, "
+                  "relpath TEXT NOT NULL, "
+                  "duration_ms INTEGER NOT NULL DEFAULT 0, "
+                  "in_ms INTEGER NOT NULL DEFAULT 0, "
+                  "out_ms INTEGER NOT NULL DEFAULT 0, "
+                  "fingerprint TEXT NOT NULL DEFAULT '', "
+                  "size INTEGER NOT NULL DEFAULT 0)") &&
+       query.exec("INSERT INTO folders(id, parent_id, name, prompt) "
+                  "VALUES('f1', '', 'Old', 'Style')") &&
+       query.exec("INSERT INTO shorts(id, folder_id, name, status, "
+                  "duration_ms, poster_relpath) "
+                  "VALUES('s1', 'f1', 'Clip', 'draft', 0, '')") &&
+       query.exec("INSERT INTO bins(id, parent_id, name) "
+                  "VALUES('root', NULL, 'Медиа')") &&
+       query.exec("PRAGMA user_version = 3");
+   database.close();
+   QSqlDatabase::removeDatabase(name);
+   return ok;
+}
+
 QString CTempDirectory::make_image(const QString& directory) const {
    if (!QDir().mkpath(directory)) {
       return {};

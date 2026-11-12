@@ -26,6 +26,8 @@ struct LibraryShort {
    QString status;
    qint64 duration_ms = 0;
    QString poster_relpath;
+   QString topic;
+   QString script;
 };
 
 /**
@@ -230,6 +232,107 @@ class CLibraryStore : public QObject {
     * @return статус или пустая строка.
     */
    Q_INVOKABLE QString short_status(const QString& id) const;
+
+   /**
+    * @brief Возвращает тему ролика.
+    * @param id - id ролика.
+    * @return тема или пусто.
+    */
+   Q_INVOKABLE QString short_topic(const QString& id) const;
+
+   /**
+    * @brief Пишет тему ролика.
+    * @param id - id ролика.
+    * @param topic - текст темы.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool set_topic(const QString& id, const QString& topic);
+
+   /**
+    * @brief Возвращает сценарий ролика.
+    * @param id - id ролика.
+    * @return сценарий или пусто.
+    */
+   Q_INVOKABLE QString short_script(const QString& id) const;
+
+   /**
+    * @brief Пишет сценарий ролика.
+    * @param id - id ролика.
+    * @param script - текст сценария.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool set_script(const QString& id,
+                               const QString& script);
+
+   /**
+    * @brief Пишет статус ролика.
+    * @param id - id ролика.
+    * @param status - draft или generating.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool set_short_status(const QString& id,
+                                     const QString& status);
+
+   /**
+    * @brief Создаёт задачу конвейера.
+    * @param short_id - ролик.
+    * @param step - text или voice.
+    * @return id задачи или пусто.
+    */
+   Q_INVOKABLE QString start_task(const QString& short_id,
+                                  const QString& step);
+
+   /**
+    * @brief Обновляет задачу.
+    * @param id - задача.
+    * @param step - шаг.
+    * @param status - running, done, error, cancelled, interrupted.
+    * @param progress - 0..100.
+    * @param error - текст ошибки.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool update_task(const QString& id, const QString& step,
+                                const QString& status, int progress,
+                                const QString& error);
+
+   /**
+    * @brief Статус последней задачи ролика.
+    * @param short_id - ролик.
+    * @return статус или пусто.
+    */
+   Q_INVOKABLE QString task_status(const QString& short_id) const;
+
+   /**
+    * @brief Шаг последней задачи ролика.
+    * @param short_id - ролик.
+    * @return шаг или пусто.
+    */
+   Q_INVOKABLE QString task_step(const QString& short_id) const;
+
+   /**
+    * @brief Прогресс последней задачи ролика.
+    * @param short_id - ролик.
+    * @return 0..100.
+    */
+   Q_INVOKABLE int task_progress(const QString& short_id) const;
+
+   /**
+    * @brief Ошибка последней задачи ролика.
+    * @param short_id - ролик.
+    * @return текст или пусто.
+    */
+   Q_INVOKABLE QString task_error(const QString& short_id) const;
+
+   /**
+    * @brief Пишет задачу для проверки прерывания.
+    * @param short_id - ролик.
+    * @param step - шаг.
+    * @param status - статус.
+    * @return id задачи или пусто.
+    */
+   Q_INVOKABLE QString insert_task(const QString& short_id,
+                                   const QString& step,
+                                   const QString& status);
 
    /**
     * @brief Сообщает, есть ли постер.
@@ -571,6 +674,10 @@ class CLibraryStore : public QObject {
    bool create_schema();
    bool migrate_from_v1();
    bool migrate_from_v2();
+   bool migrate_from_v3();
+   bool interrupt_running_tasks();
+   QString latest_task_field(const QString& short_id,
+                             const QString& field) const;
    bool ensure_pool_tables();
    bool ensure_root_bin();
    bool register_assets_from_projects();

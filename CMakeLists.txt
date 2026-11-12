@@ -15,7 +15,7 @@ if(MSVC)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS
-  Quick QuickControls2 QuickTest Sql Multimedia)
+  Quick QuickControls2 QuickTest Sql Multimedia Network)
 
 if(NOT FFMPEG_ROOT)
   set(FFMPEG_ROOT "$ENV{FFMPEG_ROOT}")
@@ -142,6 +142,16 @@ qt_add_qml_module(creator_qml
     src/exporter.cpp
     src/preview_audio.h
     src/preview_audio.cpp
+    src/secret_store.h
+    src/secret_store.cpp
+    src/http_transport.h
+    src/http_transport.cpp
+    src/chat_tool.h
+    src/chat_tool.cpp
+    src/speech_tool.h
+    src/speech_tool.cpp
+    src/pipeline.h
+    src/pipeline.cpp
   QML_FILES
     qml/Main.qml
     qml/Theme.qml
@@ -162,6 +172,7 @@ target_include_directories(creator_qml PUBLIC
   "${FFMPEG_ROOT}/include")
 target_link_libraries(creator_qml PUBLIC
   Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Multimedia
+  Qt6::Network crypt32
   "${_FFMPEG_STAGE}/lib/avcodec.lib"
   "${_FFMPEG_STAGE}/lib/avformat.lib"
   "${_FFMPEG_STAGE}/lib/avutil.lib"
@@ -187,7 +198,7 @@ qt_add_executable(youtube-creator
 )
 target_link_libraries(youtube-creator PRIVATE
   Qt6::Quick Qt6::QuickControls2 Qt6::Sql Qt6::Multimedia
-  creator_qmlplugin)
+  Qt6::Network creator_qmlplugin)
 youtube_copy_sqlite(youtube-creator)
 youtube_copy_imageformats(youtube-creator)
 youtube_copy_ffmpeg(youtube-creator)
@@ -200,7 +211,7 @@ qt_add_executable(shell_tests
 )
 target_link_libraries(shell_tests
   PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickTest Qt6::Sql
-          Qt6::Multimedia creator_qmlplugin)
+          Qt6::Multimedia Qt6::Network creator_qmlplugin)
 target_include_directories(shell_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 youtube_copy_sqlite(shell_tests)

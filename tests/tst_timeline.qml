@@ -589,6 +589,88 @@ TestCase {
       paths.remove_tree(ctx.dir)
    }
 
+   function chatJson(text) {
+      return "{\"choices\":[{\"message\":{\"content\":\"" +
+         text + "\"}}]}"
+   }
+
+   function waitStopped(pipeline) {
+      tryVerify(function() { return !pipeline.running }, 5000)
+   }
+
+   function test_pipelinePlacesVoiceWithoutNewShort() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.load()
+      secrets.apiKey = "sk-test"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_json(chatJson("Voice over"))
+      transport.enqueue_file(paths.make_wav(ctx.dir))
+      const shortsBefore = ctx.store.short_count()
+      const v1Before = ctx.project.first_clip_on("v1")
+      verify(ctx.store.set_topic(ctx.id, "Topic"))
+      verify(pipeline.run(ctx.id))
+      waitStopped(pipeline)
+      compare(ctx.store.short_count(), shortsBefore)
+      compare(ctx.project.first_clip_on("v1"), v1Before)
+      const voice = ctx.project.first_clip_on("a1")
+      verify(voice.length > 0)
+      const rel = ctx.store.asset_relpath(
+         ctx.project.clip_asset_id(voice))
+      verify(rel.indexOf("media/") === 0)
+      verify(paths.file_exists(ctx.dir + "/" + rel))
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
+   function test_pipelineVoiceTrimIndependent() {
+      const shell = createShell()
+      const ctx = openImported(shell, "vertical-short.mp4")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.load()
+      secrets.apiKey = "sk-test"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_json(chatJson("Voice over"))
+      transport.enqueue_file(paths.make_wav(ctx.dir))
+      verify(ctx.store.set_topic(ctx.id, "Topic"))
+      verify(pipeline.run(ctx.id))
+      waitStopped(pipeline)
+      const video = ctx.project.first_clip_on("v1")
+      const voice = ctx.project.first_clip_on("a1")
+      const videoOut = ctx.project.clip_out(video)
+      const voiceOut = ctx.project.clip_out(voice)
+      const trimmed = Math.max(1, Math.floor(voiceOut / 2))
+      verify(ctx.project.trim_clip(voice, 0, trimmed))
+      compare(ctx.project.clip_out(video), videoOut)
+      verify(ctx.project.clip_out(voice) < voiceOut)
+      paths.save_library_path(ctx.dir)
+      const again = createShell()
+      const store = requireChild(again, "libraryStore")
+      verify(store.open_saved())
+      requireChild(again, "libraryPane").select_entry(ctx.id, "short")
+      const project = requireChild(again, "projectDocument")
+      tryVerify(function() { return project.clipCount >= 1 })
+      const openedVoice = project.first_clip_on("a1")
+      compare(project.clip_out(openedVoice), trimmed)
+      compare(project.clip_in(openedVoice), 0)
+      store.close()
+      ctx.store.close()
+      paths.remove_tree(ctx.dir)
+   }
+
    function test_exportUsesSameDocument() {
       const shell = createShell()
       const ctx = openImported(shell, "vertical-short.mp4")
