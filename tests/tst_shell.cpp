@@ -1,9 +1,12 @@
+#include "temp_directory.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QQuickStyle>
 #include <QSettings>
-#include <QtQuickTest>
+#include <QtQml/qqml.h>
 #include <QtQml/qqmlextensionplugin.h>
+#include <QtQuickTest>
 
 Q_IMPORT_QML_PLUGIN(CreatorPlugin)
 
@@ -24,6 +27,8 @@ int main(int argc, char* argv[]) {
    QSettings::setPath(
       QSettings::IniFormat, QSettings::UserScope, settings_dir);
    QQuickStyle::setStyle("Basic");
+   qmlRegisterType<CTempDirectory>(
+       "CreatorTests", 1, 0, "TempDirectory");
    return quick_test_main(
       argc, argv, "shell", QUICK_TEST_SOURCE_DIR);
 }

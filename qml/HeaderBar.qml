@@ -5,6 +5,7 @@ import QtQuick.Layouts
 Rectangle {
    id: header
    objectName: "headerBar"
+   property alias query: searchText.text
    implicitHeight: Theme.headerHeight
    height: Theme.headerHeight
    color: Theme.canvas
@@ -75,6 +76,15 @@ Rectangle {
             bottomLeftRadius: 0
             topRightRadius: Theme.searchCornerRadius
             bottomRightRadius: Theme.searchCornerRadius
+
+            Glyph {
+               objectName: "searchGlyph"
+               anchors.centerIn: parent
+               width: Theme.iconSize
+               height: Theme.iconSize
+               glyphName: "search"
+               strokeColor: "#f1f1f1"
+            }
          }
       }
 
