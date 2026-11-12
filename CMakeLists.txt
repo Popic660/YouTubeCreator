@@ -14,7 +14,20 @@ if(MSVC)
   add_compile_options(/utf-8)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 QuickTest)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 QuickTest Sql)
+
+get_filename_component(_QT_ROOT "${Qt6_DIR}/../../.." ABSOLUTE)
+set(_SQLITE_DIR "${_QT_ROOT}/plugins/sqldrivers")
+
+function(youtube_copy_sqlite target)
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:${target}>/sqldrivers"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_SQLITE_DIR}/$<IF:$<CONFIG:Debug>,qsqlited.dll,qsqlite.dll>"
+            "$<TARGET_FILE_DIR:${target}>/sqldrivers/"
+    VERBATIM)
+endfunction()
 
 qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
@@ -30,6 +43,12 @@ qt_add_qml_module(creator_qml
   SOURCES
     src/window_state.h
     src/window_state.cpp
+    src/library_store.h
+    src/library_store.cpp
+    src/library_model.h
+    src/library_model.cpp
+    src/dock_state.h
+    src/dock_state.cpp
   QML_FILES
     qml/Main.qml
     qml/Theme.qml
@@ -43,7 +62,8 @@ qt_add_qml_module(creator_qml
 )
 target_include_directories(creator_qml PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(creator_qml PUBLIC Qt6::Quick Qt6::QuickControls2)
+target_link_libraries(creator_qml PUBLIC
+  Qt6::Quick Qt6::QuickControls2 Qt6::Sql)
 qt_add_resources(creator_qml window_icon
   PREFIX "/icons"
   BASE "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons"
@@ -62,13 +82,19 @@ qt_add_resources(creator_qml fonts
 qt_add_executable(youtube-creator
   src/main.cpp
 )
-target_link_libraries(youtube-creator PRIVATE Qt6::Quick Qt6::QuickControls2 creator_qmlplugin)
+target_link_libraries(youtube-creator PRIVATE
+  Qt6::Quick Qt6::QuickControls2 Qt6::Sql creator_qmlplugin)
+youtube_copy_sqlite(youtube-creator)
 
 qt_add_executable(shell_tests
   tests/tst_shell.cpp
+  tests/temp_directory.cpp
+  tests/temp_directory.h
 )
 target_link_libraries(shell_tests
-  PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickTest creator_qmlplugin)
+  PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::QuickTest Qt6::Sql
+          creator_qmlplugin)
+youtube_copy_sqlite(shell_tests)
 target_compile_definitions(shell_tests PRIVATE
   QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
 )
