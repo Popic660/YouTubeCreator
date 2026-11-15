@@ -10,7 +10,7 @@
 #include <QtQml/qqmlregistration.h>
 
 /**
- * @brief Конвейер текста и голоса для ролика.
+ * @brief Конвейер текста, голоса, видео и обложки.
  */
 class CPipeline : public QObject {
    Q_OBJECT
@@ -33,6 +33,11 @@ class CPipeline : public QObject {
    Q_PROPERTY(bool running READ is_running NOTIFY progress_changed)
    Q_PROPERTY(bool pauseAfterText READ pause_after_text
                   WRITE set_pause_after_text NOTIFY progress_changed)
+   Q_PROPERTY(bool pauseAfterVoice READ pause_after_voice
+                  WRITE set_pause_after_voice NOTIFY progress_changed)
+   Q_PROPERTY(bool pauseAfterVideoScene READ pause_after_video_scene
+                  WRITE set_pause_after_video_scene
+                  NOTIFY progress_changed)
    Q_PROPERTY(QString needsSettingsMessage READ needs_settings_message
                   NOTIFY progress_changed)
 
@@ -53,6 +58,10 @@ class CPipeline : public QObject {
    QString last_error() const { return last_error_; }
    bool is_running() const { return running_; }
    bool pause_after_text() const { return pause_after_text_; }
+   bool pause_after_voice() const { return pause_after_voice_; }
+   bool pause_after_video_scene() const {
+      return pause_after_video_scene_;
+   }
    QString needs_settings_message() const {
       return needs_settings_message_;
    }
@@ -88,7 +97,19 @@ class CPipeline : public QObject {
    void set_pause_after_text(bool enabled);
 
    /**
-    * @brief Запускает текст и голос.
+    * @brief Останавливает конвейер после голоса.
+    * @param enabled - true, чтобы ждать resume.
+    */
+   void set_pause_after_voice(bool enabled);
+
+   /**
+    * @brief Останавливает конвейер после одной сцены видео.
+    * @param enabled - true, чтобы ждать resume.
+    */
+   void set_pause_after_video_scene(bool enabled);
+
+   /**
+    * @brief Запускает текст, голос, видео и обложку.
     * @param short_id - ролик.
     * @return true, если запуск принят.
     */
@@ -107,7 +128,7 @@ class CPipeline : public QObject {
    Q_INVOKABLE void cancel();
 
    /**
-    * @brief Продолжает голос после паузы на тексте.
+    * @brief Продолжает после паузы.
     */
    Q_INVOKABLE void resume();
 
@@ -121,11 +142,16 @@ class CPipeline : public QObject {
  private:
    void run_text_step();
    void run_voice_step();
+   void run_video_step();
+   void run_cover_step();
    void finish_ok();
    void finish_error(const QString& error);
    void finish_cancelled();
    bool prepare_run(const QString& short_id,
                     bool allow_existing_script);
+   void continue_from_current();
+   qint64 video_end_ms() const;
+   QString first_step() const;
 
    CLibraryStore* store_ = nullptr;
    CProjectDocument* document_ = nullptr;
@@ -140,5 +166,10 @@ class CPipeline : public QObject {
    bool running_ = false;
    bool cancelled_ = false;
    bool pause_after_text_ = false;
+   bool pause_after_voice_ = false;
+   bool pause_after_video_scene_ = false;
    bool skip_text_ = false;
+   bool skip_voice_ = false;
+   bool skip_video_ = false;
+   bool skip_cover_ = false;
 };

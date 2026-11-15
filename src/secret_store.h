@@ -21,6 +21,17 @@ class CSecretStore : public QObject {
    Q_PROPERTY(QString apiKey READ api_key_display WRITE set_api_key
                   NOTIFY settings_changed)
    Q_PROPERTY(bool hasKey READ has_key NOTIFY settings_changed)
+   Q_PROPERTY(QString klingBaseUrl READ kling_base_url
+                  WRITE set_kling_base_url NOTIFY settings_changed)
+   Q_PROPERTY(QString klingModel READ kling_model
+                  WRITE set_kling_model NOTIFY settings_changed)
+   Q_PROPERTY(QString klingImageModel READ kling_image_model
+                  WRITE set_kling_image_model
+                  NOTIFY settings_changed)
+   Q_PROPERTY(QString klingApiKey READ kling_api_key_display
+                  WRITE set_kling_api_key NOTIFY settings_changed)
+   Q_PROPERTY(bool hasKlingKey READ has_kling_key
+                  NOTIFY settings_changed)
 
  public:
    /**
@@ -33,6 +44,9 @@ class CSecretStore : public QObject {
    QString chat_model() const { return chat_model_; }
    QString tts_model() const { return tts_model_; }
    QString voice() const { return voice_; }
+   QString kling_base_url() const { return kling_base_url_; }
+   QString kling_model() const { return kling_model_; }
+   QString kling_image_model() const { return kling_image_model_; }
 
    /**
     * @brief Поле ключа для UI: после save всегда пустое.
@@ -51,6 +65,24 @@ class CSecretStore : public QObject {
     * @return true, если ключ непустой.
     */
    bool has_key() const { return !api_key_.isEmpty(); }
+
+   /**
+    * @brief Поле ключа Kling для UI: после save всегда пустое.
+    * @return пустая строка.
+    */
+   QString kling_api_key_display() const { return {}; }
+
+   /**
+    * @brief Секрет Kling для вызова модели.
+    * @return ключ или пусто.
+    */
+   QString secret_kling_api_key() const { return kling_api_key_; }
+
+   /**
+    * @brief Сообщает, что ключ Kling задан.
+    * @return true, если ключ непустой.
+    */
+   bool has_kling_key() const { return !kling_api_key_.isEmpty(); }
 
    /**
     * @brief Задаёт адрес OpenAI-совместимого API.
@@ -81,6 +113,30 @@ class CSecretStore : public QObject {
     * @param key - секрет.
     */
    void set_api_key(const QString& key);
+
+   /**
+    * @brief Задаёт адрес Kling.
+    * @param url - базовый URL.
+    */
+   void set_kling_base_url(const QString& url);
+
+   /**
+    * @brief Задаёт модель видео Kling.
+    * @param model - имя модели.
+    */
+   void set_kling_model(const QString& model);
+
+   /**
+    * @brief Задаёт модель картинки Kling.
+    * @param model - имя модели.
+    */
+   void set_kling_image_model(const QString& model);
+
+   /**
+    * @brief Задаёт ключ Kling до save.
+    * @param key - секрет.
+    */
+   void set_kling_api_key(const QString& key);
 
    /**
     * @brief Включает память вместо DPAPI для тестов.
@@ -123,5 +179,10 @@ class CSecretStore : public QObject {
    QString tts_model_ = QStringLiteral("tts-1");
    QString voice_ = QStringLiteral("alloy");
    QString api_key_;
+   QString kling_base_url_ =
+       QStringLiteral("https://api-singapore.klingai.com");
+   QString kling_model_ = QStringLiteral("kling-4.0-flash");
+   QString kling_image_model_ = QStringLiteral("kling-v3");
+   QString kling_api_key_;
    bool memory_ = false;
 };

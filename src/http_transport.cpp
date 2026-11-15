@@ -11,15 +11,20 @@
 QString http_api_message(const HttpResponse& response) {
    const QJsonDocument document =
        QJsonDocument::fromJson(response.body);
-   const QString message =
-       document.object()
-           .value(QStringLiteral("error"))
+   const QJsonObject object = document.object();
+   const QString nested =
+       object.value(QStringLiteral("error"))
            .toObject()
            .value(QStringLiteral("message"))
            .toString()
            .trimmed();
-   if (!message.isEmpty()) {
-      return message;
+   if (!nested.isEmpty()) {
+      return nested;
+   }
+   const QString top =
+       object.value(QStringLiteral("message")).toString().trimmed();
+   if (!top.isEmpty()) {
+      return top;
    }
    if (response.status >= 400) {
       return QStringLiteral("HTTP %1").arg(response.status);
@@ -64,8 +69,10 @@ void CHttpTransport::clear() {
    call_count_ = 0;
    chat_count_ = 0;
    speech_count_ = 0;
+   kling_count_ = 0;
    last_url_.clear();
    last_body_.clear();
+   urls_.clear();
    aborted_ = false;
    emit log_changed();
 }
@@ -75,32 +82,65 @@ void CHttpTransport::abort() {
    emit abort_requested();
 }
 
+void CHttpTransport::clear_abort() {
+   aborted_ = false;
+}
+
 void CHttpTransport::record(const QString& url,
                             const QByteArray& body) {
    ++call_count_;
    last_url_ = url;
    last_body_ = body;
+   urls_.append(url);
    if (url.contains(QLatin1String("/v1/chat/completions"))) {
       ++chat_count_;
    }
    if (url.contains(QLatin1String("/v1/audio/speech"))) {
       ++speech_count_;
    }
+   if (url.contains(QLatin1String("klingai.com")) ||
+       url.contains(QLatin1String("/text-to-video/")) ||
+       url.contains(QLatin1String("/v1/images/")) ||
+       url.contains(QLatin1String("/tasks"))) {
+      ++kling_count_;
+   }
    emit log_changed();
+}
+
+QVariantMap CHttpTransport::to_map(const HttpResponse& response) {
+   QVariantMap map;
+   map.insert(QStringLiteral("status"), response.status);
+   map.insert(QStringLiteral("body"),
+              QString::fromUtf8(response.body));
+   map.insert(QStringLiteral("error"), response.error);
+   return map;
 }
 
 HttpResponse CHttpTransport::post(const QString& url,
                                   const QString& bearer,
                                   const QByteArray& body) {
-   aborted_ = false;
    record(url, body);
    if (stub_) {
-      return post_stub();
+      return take_stub();
    }
-   return post_live(url, bearer, body);
+   return live(QStringLiteral("POST"), url, bearer, body);
 }
 
-HttpResponse CHttpTransport::post_stub() {
+HttpResponse CHttpTransport::get_response(const QString& url,
+                                          const QString& bearer) {
+   record(url, {});
+   if (stub_) {
+      return take_stub();
+   }
+   return live(QStringLiteral("GET"), url, bearer, {});
+}
+
+QVariantMap CHttpTransport::get(const QString& url,
+                                const QString& bearer) {
+   return to_map(get_response(url, bearer));
+}
+
+HttpResponse CHttpTransport::take_stub() {
    if (aborted_) {
       HttpResponse response;
       response.error = QStringLiteral("cancelled");
@@ -116,19 +156,28 @@ HttpResponse CHttpTransport::post_stub() {
    return response;
 }
 
-HttpResponse CHttpTransport::post_live(const QString& url,
-                                       const QString& bearer,
-                                       const QByteArray& body) {
+HttpResponse CHttpTransport::live(const QString& method,
+                                  const QString& url,
+                                  const QString& bearer,
+                                  const QByteArray& body) {
+   aborted_ = false;
    QNetworkAccessManager manager;
    QNetworkRequest request{QUrl(url)};
-   request.setHeader(QNetworkRequest::ContentTypeHeader,
-                     QStringLiteral("application/json"));
+   if (method == QLatin1String("POST")) {
+      request.setHeader(QNetworkRequest::ContentTypeHeader,
+                        QStringLiteral("application/json"));
+   }
    if (!bearer.isEmpty()) {
       request.setRawHeader(
           "Authorization",
           QByteArray("Bearer ") + bearer.toUtf8());
    }
-   QNetworkReply* reply = manager.post(request, body);
+   QNetworkReply* reply = nullptr;
+   if (method == QLatin1String("GET")) {
+      reply = manager.get(request);
+   } else {
+      reply = manager.post(request, body);
+   }
    QEventLoop loop;
    QObject::connect(reply, &QNetworkReply::finished, &loop,
                     &QEventLoop::quit);

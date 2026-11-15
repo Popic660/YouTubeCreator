@@ -28,6 +28,7 @@ struct LibraryShort {
    QString poster_relpath;
    QString topic;
    QString script;
+   QString cover_relpath;
 };
 
 /**
@@ -267,7 +268,7 @@ class CLibraryStore : public QObject {
    /**
     * @brief Пишет статус ролика.
     * @param id - id ролика.
-    * @param status - draft или generating.
+    * @param status - draft, generating или ready.
     * @return true, если записано.
     */
    Q_INVOKABLE bool set_short_status(const QString& id,
@@ -354,6 +355,29 @@ class CLibraryStore : public QObject {
     * @return путь или пусто.
     */
    Q_INVOKABLE QString short_poster_path(const QString& id) const;
+
+   /**
+    * @brief Относительный путь обложки YouTube.
+    * @param id - id ролика.
+    * @return путь внутри библиотеки или пусто.
+    */
+   Q_INVOKABLE QString short_cover_relpath(const QString& id) const;
+
+   /**
+    * @brief Абсолютный путь обложки, если файл есть.
+    * @param id - id ролика.
+    * @return путь или пусто.
+    */
+   Q_INVOKABLE QString short_cover_path(const QString& id) const;
+
+   /**
+    * @brief Пишет относительный путь обложки.
+    * @param id - id ролика.
+    * @param cover_relpath - путь внутри библиотеки.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool set_cover_relpath(const QString& id,
+                                      const QString& cover_relpath);
 
    /**
     * @brief Пишет длительность и постер карточки.
@@ -675,6 +699,7 @@ class CLibraryStore : public QObject {
    bool migrate_from_v1();
    bool migrate_from_v2();
    bool migrate_from_v3();
+   bool migrate_from_v4();
    bool interrupt_running_tasks();
    QString latest_task_field(const QString& short_id,
                              const QString& field) const;

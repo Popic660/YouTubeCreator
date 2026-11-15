@@ -248,6 +248,7 @@ ApplicationWindow {
 
    function open_settings() {
       settingsKeyField.text = ""
+      settingsKlingKeyField.text = ""
       center_settings_dialog()
       settingsDialog.open()
    }
@@ -271,8 +272,14 @@ ApplicationWindow {
       if (settingsKeyField.text.length > 0) {
          secretStore.apiKey = settingsKeyField.text
       }
+      secretStore.klingBaseUrl = settingsKlingBaseField.text
+      secretStore.klingModel = settingsKlingModelField.text
+      if (settingsKlingKeyField.text.length > 0) {
+         secretStore.klingApiKey = settingsKlingKeyField.text
+      }
       secretStore.save()
       settingsKeyField.text = ""
+      settingsKlingKeyField.text = ""
       settingsDialog.close()
    }
 
@@ -782,6 +789,9 @@ ApplicationWindow {
          settingsTtsField.text = secretStore.ttsModel
          settingsVoiceField.text = secretStore.voice
          settingsKeyField.text = ""
+         settingsKlingBaseField.text = secretStore.klingBaseUrl
+         settingsKlingModelField.text = secretStore.klingModel
+         settingsKlingKeyField.text = ""
          shell.center_settings_dialog()
       }
       contentItem: ColumnLayout {
@@ -871,6 +881,61 @@ ApplicationWindow {
                color: "transparent"
                border.width: settingsKeyField.activeFocus ? 2 : 1
                border.color: settingsKeyField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsKlingBaseField
+            objectName: "settingsKlingBaseField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Адрес Kling"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsKlingBaseField.activeFocus ? 2 : 1
+               border.color: settingsKlingBaseField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsKlingModelField
+            objectName: "settingsKlingModelField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Модель видео"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsKlingModelField.activeFocus
+                  ? 2 : 1
+               border.color: settingsKlingModelField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsKlingKeyField
+            objectName: "settingsKlingKeyField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            echoMode: TextInput.Password
+            placeholderText: secretStore.hasKlingKey
+               ? "Ключ Kling задан"
+               : "Ключ Kling"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsKlingKeyField.activeFocus ? 2 : 1
+               border.color: settingsKlingKeyField.activeFocus
                   ? Theme.link : Theme.outline
             }
          }

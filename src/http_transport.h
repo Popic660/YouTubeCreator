@@ -3,6 +3,8 @@
 #include <QByteArray>
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include <vector>
@@ -32,8 +34,10 @@ class CHttpTransport : public QObject {
    Q_PROPERTY(int callCount READ call_count NOTIFY log_changed)
    Q_PROPERTY(int chatCount READ chat_count NOTIFY log_changed)
    Q_PROPERTY(int speechCount READ speech_count NOTIFY log_changed)
+   Q_PROPERTY(int klingCount READ kling_count NOTIFY log_changed)
    Q_PROPERTY(QString lastUrl READ last_url NOTIFY log_changed)
    Q_PROPERTY(QString lastBody READ last_body_text NOTIFY log_changed)
+   Q_PROPERTY(QStringList urls READ urls NOTIFY log_changed)
 
  public:
    /**
@@ -45,7 +49,9 @@ class CHttpTransport : public QObject {
    int call_count() const { return call_count_; }
    int chat_count() const { return chat_count_; }
    int speech_count() const { return speech_count_; }
+   int kling_count() const { return kling_count_; }
    QString last_url() const { return last_url_; }
+   QStringList urls() const { return urls_; }
    QString last_body_text() const {
       return QString::fromUtf8(last_body_);
    }
@@ -79,9 +85,14 @@ class CHttpTransport : public QObject {
    Q_INVOKABLE void clear();
 
    /**
-    * @brief Прерывает текущий POST.
+    * @brief Прерывает текущий POST или GET.
     */
    Q_INVOKABLE void abort();
+
+   /**
+    * @brief Снимает флаг отмены перед новым запуском.
+    */
+   void clear_abort();
 
    /**
     * @brief Выполняет POST.
@@ -92,6 +103,24 @@ class CHttpTransport : public QObject {
     */
    HttpResponse post(const QString& url, const QString& bearer,
                      const QByteArray& body);
+
+   /**
+    * @brief Выполняет GET.
+    * @param url - адрес.
+    * @param bearer - ключ или пусто.
+    * @return ответ или ошибка.
+    */
+   HttpResponse get_response(const QString& url,
+                             const QString& bearer);
+
+   /**
+    * @brief GET для QML-тестов.
+    * @param url - адрес.
+    * @param bearer - ключ или пусто.
+    * @return status, body, error.
+    */
+   Q_INVOKABLE QVariantMap get(const QString& url,
+                               const QString& bearer);
 
  signals:
    /**
@@ -105,17 +134,20 @@ class CHttpTransport : public QObject {
    void abort_requested();
 
  private:
-   HttpResponse post_stub();
-   HttpResponse post_live(const QString& url, const QString& bearer,
-                          const QByteArray& body);
+   HttpResponse take_stub();
+   HttpResponse live(const QString& method, const QString& url,
+                     const QString& bearer, const QByteArray& body);
    void record(const QString& url, const QByteArray& body);
+   static QVariantMap to_map(const HttpResponse& response);
 
    bool stub_ = false;
    bool aborted_ = false;
    int call_count_ = 0;
    int chat_count_ = 0;
    int speech_count_ = 0;
+   int kling_count_ = 0;
    QString last_url_;
    QByteArray last_body_;
+   QStringList urls_;
    std::vector<HttpResponse> queue_;
 };

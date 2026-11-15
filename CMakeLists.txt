@@ -152,6 +152,12 @@ qt_add_qml_module(creator_qml
     src/speech_tool.cpp
     src/pipeline.h
     src/pipeline.cpp
+    src/scene_parser.h
+    src/scene_parser.cpp
+    src/video_tool.h
+    src/video_tool.cpp
+    src/cover_tool.h
+    src/cover_tool.cpp
   QML_FILES
     qml/Main.qml
     qml/Theme.qml
