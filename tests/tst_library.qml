@@ -88,13 +88,17 @@ TestCase {
       const dir = paths.make()
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       verify(store.schema_contains("folders"))
       verify(store.schema_contains("shorts"))
       verify(store.schema_contains("bins"))
       verify(store.schema_contains("assets"))
       verify(store.schema_contains("tasks"))
       verify(store.schema_contains("channels"))
+      verify(store.schema_contains("publications"))
+      verify(store.schema_contains("stats_snapshots"))
+      verify(store.schema_contains("quota_usage"))
+      compare(store.publication_count(), 0)
       verify(store.schema_contains("folders_name"))
       verify(store.schema_contains("shorts_name"))
       verify(store.schema_contains("shorts_folder"))
@@ -119,7 +123,7 @@ TestCase {
       verify(paths.seed_schema_v1(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       compare(store.folder_name("f1"), "Old")
       verify(store.schema_contains("bins"))
       verify(store.schema_contains("channels"))
@@ -136,7 +140,7 @@ TestCase {
       verify(paths.seed_schema_v2(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.asset_name("a1"), "vertical-short")
@@ -826,7 +830,7 @@ TestCase {
       verify(paths.seed_schema_v3(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.short_status("s1"), "draft")
@@ -843,7 +847,7 @@ TestCase {
       verify(paths.seed_schema_v4(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.short_status("s1"), "draft")
@@ -959,7 +963,7 @@ TestCase {
       verify(paths.seed_schema_v5(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 6)
+      compare(store.user_version(), 7)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.channel_count(), 0)
@@ -1142,6 +1146,265 @@ TestCase {
       item.clicked()
       compare(store.channel_count(), 0)
       compare(shell.channelConnected, false)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_migrateFromV6AddsPublications() {
+      const dir = paths.make()
+      verify(paths.seed_schema_v6(dir))
+      const store = createStore()
+      verify(store.open(dir))
+      compare(store.user_version(), 7)
+      compare(store.folder_name("f1"), "Old")
+      compare(store.short_name("s1"), "Clip")
+      compare(store.channel_title("UC1"), "Old Channel")
+      verify(store.schema_contains("publications"))
+      compare(store.publication_count(), 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_upsertPublicationUpdatesSamePair() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Clips")
+      const clip = store.create_short(folder, "Draft")
+      verify(store.upsert_publication(clip, "UC1", "vid-old",
+         "private", "uploaded", "", ""))
+      verify(store.upsert_publication(clip, "UC1", "vid-new",
+         "public", "uploaded", "set", ""))
+      compare(store.publication_count(clip), 1)
+      const pub = store.publication_id_at(clip, 0)
+      compare(store.publication_video_id(pub), "vid-new")
+      compare(store.publication_privacy(pub), "public")
+      store.close()
+      const again = createStore()
+      verify(again.open(dir))
+      compare(again.publication_count(clip), 1)
+      const againPub = again.publication_id_at(clip, 0)
+      compare(again.publication_video_id(againPub), "vid-new")
+      const db = paths.read_text(dir + "/library.db")
+      verify(db.indexOf("refresh-token-secret") < 0)
+      again.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publicationsSurviveDisconnect() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "First", "1//r1")
+      verify(auth.complete_with_code("c1"))
+      const folder = store.create_folder("", "Clips")
+      const clip = store.create_short(folder, "Draft")
+      verify(store.upsert_publication(clip, "UC1", "vid-keep",
+         "private", "uploaded", "", ""))
+      verify(store.upsert_publication(clip, "UC2", "vid-two",
+         "unlisted", "uploaded", "", ""))
+      store.close()
+      const again = createStore()
+      verify(again.open(dir))
+      compare(again.publication_count(clip), 2)
+      again.close()
+      verify(store.open(dir))
+      const before = transport.googleCount
+      verify(auth.disconnect_channel("UC1"))
+      compare(store.channel_count(), 0)
+      compare(store.publication_count(clip), 2)
+      verify(store.short_has_video(clip))
+      compare(transport.googleCount, before)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_statsSnapshotPersistsAndIsNotSearched() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      verify(store.open(dir))
+      const payload = JSON.stringify({
+         views: 12,
+         uniqueMarker: "stats-payload-zz"
+      })
+      verify(store.upsert_stats("video", "vid-1", payload))
+      store.close()
+      const again = createStore()
+      verify(again.open(dir))
+      compare(again.stats_payload("video", "vid-1"), payload)
+      verify(again.stats_synced_ms("video", "vid-1") > 0)
+      again.close()
+      verify(store.open(dir))
+      requireChild(shell, "searchText").text = "stats-payload-zz"
+      compare(requireChild(shell, "libraryModel").count, 0)
+      compare(requireChild(shell, "notFoundMessage").text,
+         "Ничего не найдено")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_quotaRemainingHitsZeroWithoutGoogle() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      compare(store.quota_remaining(), 100)
+      for (let i = 0; i < 100; ++i) {
+         verify(store.increment_quota())
+      }
+      compare(store.quota_remaining(), 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function seedReadyShort(store, dir, name) {
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, name)
+      verify(store.set_short_status(id, "ready"))
+      verify(store.set_script(id, "Scene text"))
+      verify(paths.mkpath(dir + "/exports"))
+      verify(paths.copy_file(paths.fixture_path("vertical-short.mp4"),
+         store.export_path(id)))
+      return id
+   }
+
+   function bindChannel(store, secrets, id, title, refresh) {
+      verify(store.upsert_channel(id, title))
+      secrets.set_channel_refresh(id, refresh)
+      verify(secrets.save())
+   }
+
+   function enqueueAccess(transport, token) {
+      transport.enqueue_json(JSON.stringify({
+         access_token: token,
+         token_type: "Bearer"
+      }))
+   }
+
+   function enqueueInsert(transport, videoId) {
+      transport.enqueue_header("Location",
+         "https://upload.test/" + videoId)
+      transport.enqueue_json("{}")
+      transport.enqueue_json(JSON.stringify({ id: videoId }))
+   }
+
+   function test_publishDialogFieldsAndQuota() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const pane = requireChild(shell, "libraryPane")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      const id = seedReadyShort(store, dir, "Clip Name")
+      pane.select_entry(id, "short")
+      const publish = requireChild(shell, "publishButton")
+      compare(publish.enabled, true)
+      publish.clicked()
+      const dialog = requireChild(shell, "publishDialog")
+      tryVerify(function() { return dialog.visible })
+      compare(requireChild(shell, "publishDialogSurface").color,
+         "#282828")
+      compare(requireChild(shell, "publishTitleField").text,
+         "Clip Name")
+      compare(requireChild(shell, "publishDescriptionField").text,
+         "Scene text")
+      compare(requireChild(shell, "publishTitleField")
+         .background.radius, 4)
+      compare(requireChild(shell, "publishConfirm").filled, true)
+      verify(requireChild(shell, "publishQuotaLabel").text.indexOf(
+         "100") >= 0)
+      tryVerify(function() {
+         return findChild(shell, "publishChannelList") !== null &&
+            findChild(shell, "publishChannelCheck-UC1") !== null
+      })
+      requireChild(shell, "publishChannelCheck-UC1")
+      requireChild(shell, "publishPrivacy-private")
+      requireChild(shell, "publishPrivacy-unlisted")
+      requireChild(shell, "publishPrivacy-public")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishDialogNeedsChannelThenShowsVideoId() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pane = requireChild(shell, "libraryPane")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      const id = seedReadyShort(store, dir, "Clip")
+      pane.select_entry(id, "short")
+      requireChild(shell, "publishButton").clicked()
+      tryVerify(function() {
+         return requireChild(shell, "publishDialog").visible
+      })
+      tryVerify(function() {
+         return findChild(shell, "publishChannelList") !== null &&
+            findChild(shell, "publishChannelCheck-UC1") !== null
+      })
+      transport.use_stub()
+      transport.clear()
+      requireChild(shell, "publishConfirm").clicked()
+      compare(transport.googleCount, 0)
+      requireChild(shell, "publishChannelCheck-UC1").checked = true
+      enqueueAccess(transport, "ya29.ui")
+      enqueueInsert(transport, "vid-ui")
+      requireChild(shell, "publishConfirm").clicked()
+      compare(store.publication_count(id), 1)
+      tryVerify(function() {
+         return requireChild(shell, "publishChannelStatus-UC1")
+            .text.indexOf("vid-ui") >= 0
+      })
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_channelMenuOpensAnalyticsAndShortReturns() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const pane = requireChild(shell, "libraryPane")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      const id = seedReadyShort(store, dir, "Draft")
+      pane.select_entry(id, "short")
+      requireChild(shell, "channelMenuButton").clicked()
+      tryVerify(function() {
+         return findChild(shell, "channelItem-UC1") !== null
+      })
+      requireChild(shell, "channelItem-UC1").clicked()
+      compare(shell.centerMode, "analytics")
+      compare(pane.selectedKind, "")
+      compare(requireChild(shell, "publishButton").enabled, false)
+      compare(requireChild(shell, "timelineHost").visible, false)
+      verify(requireChild(shell, "libraryList") !== null)
+      shell.close_analytics()
+      pane.open_short_menu(id)
+      requireChild(shell, "menuStats").clicked()
+      verify(shell.centerMode !== "analytics")
+      verify(store.upsert_publication(id, "UC1", "vid-1", "unlisted",
+         "uploaded", "", ""))
+      pane.open_short_menu(id)
+      requireChild(shell, "menuStats").clicked()
+      compare(shell.centerMode, "analytics")
+      pane.select_entry(id, "short")
+      verify(shell.centerMode !== "analytics")
+      compare(requireChild(shell, "timelineHost").visible, true)
       store.close()
       paths.remove_tree(dir)
    }

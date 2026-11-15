@@ -7,12 +7,15 @@ Rectangle {
    objectName: "headerBar"
    property alias query: searchText.text
    property bool exportEnabled: false
+   property bool publishEnabled: false
    property var channelAuth: null
    property int channelCount: 0
    signal exportRequested()
+   signal publishRequested()
    signal settingsRequested()
    signal connectChannelRequested()
    signal disconnectChannelRequested(string channelId)
+   signal channelStatsRequested(string channelId)
 
    function channelIdAt(index) {
       if (!channelAuth) {
@@ -147,6 +150,33 @@ Rectangle {
 
       Item {
          Layout.alignment: Qt.AlignVCenter
+         implicitWidth: publishButton.implicitWidth
+         implicitHeight: publishButton.implicitHeight
+         Layout.preferredWidth: implicitWidth
+         Layout.preferredHeight: implicitHeight
+
+         CapsuleButton {
+            id: publishButton
+            objectName: "publishButton"
+            text: "Опубликовать"
+            filled: true
+            enabled: header.publishEnabled
+            hint: "Открыть диалог публикации выбранного ролика. " +
+               "Нужен готовый экспорт в exports и подключённый канал. " +
+               "Без выбранного ролика кнопка серая."
+            onClicked: header.publishRequested()
+         }
+         HoverHandler {
+            id: publishHover
+         }
+         HintTip {
+            visible: !publishButton.enabled && publishHover.hovered
+            text: publishButton.hint
+         }
+      }
+
+      Item {
+         Layout.alignment: Qt.AlignVCenter
          implicitWidth: exportButton.implicitWidth
          implicitHeight: exportButton.implicitHeight
          Layout.preferredWidth: implicitWidth
@@ -156,7 +186,7 @@ Rectangle {
             id: exportButton
             objectName: "exportButton"
             text: "Экспорт"
-            filled: true
+            filled: false
             enabled: header.exportEnabled
             hint: "Собрать вертикальный MP4 1080×1920. Как работать: " +
                "1) выберите ролик с клипами в дереве слева; " +
@@ -229,8 +259,8 @@ Rectangle {
             objectName: "channelHint"
             visible: channelHover.hovered
             text: "Каналы YouTube. Подключите канал через вход Google. " +
-               "Нужен client id в настройках. Публикация на этом " +
-               "этапе не запускается."
+               "Нужен client id в настройках. Название канала открывает " +
+               "статистику."
          }
          Menu {
             id: channelMenu
@@ -257,6 +287,7 @@ Rectangle {
                   property ChannelMenuItem titleItem: ChannelMenuItem {
                      objectName: "channelItem-" + cid
                      text: ctitle
+                     onTriggered: header.channelStatsRequested(cid)
                   }
                   property ChannelMenuItem offItem: ChannelMenuItem {
                      objectName: "disconnectChannel-" + cid

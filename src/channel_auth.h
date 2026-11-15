@@ -5,6 +5,7 @@
 #include "secret_store.h"
 
 #include <QByteArray>
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QtQml/qqmlregistration.h>
@@ -89,6 +90,13 @@ class CChannelAuth : public QObject {
    Q_INVOKABLE bool disconnect_channel(const QString& channel_id);
 
    /**
+    * @brief Access-токен канала из refresh, только в памяти.
+    * @param channel_id - id YouTube.
+    * @return access или пусто.
+    */
+   Q_INVOKABLE QString access_token(const QString& channel_id);
+
+   /**
     * @brief Число каналов в открытой библиотеке.
     * @return строки channels.
     */
@@ -139,4 +147,5 @@ class CChannelAuth : public QObject {
    QString last_error_;
    QString verifier_;
    QString redirect_uri_;
+   QHash<QString, QString> access_tokens_;
 };

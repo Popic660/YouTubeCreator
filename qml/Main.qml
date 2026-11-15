@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml.Models
 
 ApplicationWindow {
    id: shell
@@ -22,6 +23,13 @@ ApplicationWindow {
    property string dropTarget: ""
    property string activeTab: "library"
    property bool panelDragging: false
+   property string analyticsKind: ""
+   property string analyticsId: ""
+   property int publishTick: 0
+   property string publishPrivacy: "unlisted"
+   property string firstPublishCid: ""
+   readonly property string centerMode: analyticsKind.length > 0
+      ? "analytics" : frameView.centerMode
 
    function start_panel_drag() {
       panelDragging = true
@@ -91,6 +99,7 @@ ApplicationWindow {
    function apply_selection() {
       const pane = libraryPane
       if (pane.selectedKind === "short" && pane.selectedId.length > 0) {
+         shell.close_analytics()
          projectDocument.open_short(pane.selectedId)
          if (projectDocument.hasRecovery) {
             center_recovery_dialog()
@@ -99,6 +108,115 @@ ApplicationWindow {
       } else {
          projectDocument.close()
       }
+   }
+
+   function close_analytics() {
+      analyticsKind = ""
+      analyticsId = ""
+   }
+
+   function first_video_id(shortId) {
+      const n = libraryStore.publication_count(shortId)
+      for (let i = 0; i < n; ++i) {
+         const pid = libraryStore.publication_id_at(shortId, i)
+         const vid = libraryStore.publication_video_id(pid)
+         if (vid.length > 0) {
+            return vid
+         }
+      }
+      return ""
+   }
+
+   function open_channel_stats(channelId) {
+      libraryPane.select_entry("", "")
+      analyticsKind = "channel"
+      analyticsId = channelId
+   }
+
+   function open_video_stats(shortId) {
+      const videoId = first_video_id(shortId)
+      if (videoId.length === 0) {
+         return
+      }
+      analyticsKind = "video"
+      analyticsId = videoId
+   }
+
+   function open_publish() {
+      const id = libraryPane.selectedId
+      publishTitleField.text = libraryStore.short_name(id)
+      publishDescriptionField.text = libraryStore.short_script(id)
+      publishPrivacy = "unlisted"
+      firstChannelCheck.checked = false
+      const n = libraryStore.channelCount
+      firstPublishCid = n > 0 ? channelAuth.channel_id_at(0) : ""
+      publishChannelListModel.clear()
+      for (let i = 0; i < n; ++i) {
+         publishChannelListModel.append({
+            cid: channelAuth.channel_id_at(i),
+            title: channelAuth.channel_title_at(i)
+         })
+      }
+      publishTick++
+      center_publish_dialog()
+      publishDialog.open()
+   }
+
+   function selected_publish_channels() {
+      const list = []
+      if (firstChannelCheck.checked && firstPublishCid.length > 0) {
+         list.push(firstPublishCid)
+      }
+      const n = publishChannelListModel.count
+      for (let i = 1; i < n; ++i) {
+         const row = extraChannelChecks.itemAt(i - 1)
+         if (row && row.checked) {
+            list.push(row.cid)
+         }
+      }
+      return list
+   }
+
+   function confirm_publish() {
+      const channels = selected_publish_channels()
+      if (channels.length === 0) {
+         return
+      }
+      publisher.publish(
+         libraryPane.selectedId,
+         channels,
+         publishTitleField.text,
+         publishDescriptionField.text,
+         publishPrivacy)
+      publishTick++
+   }
+
+   function center_publish_dialog() {
+      const host = shell.contentItem
+      publishDialog.parent = host
+      Qt.callLater(function() {
+         publishDialog.x = Math.round(
+            (host.width - publishDialog.width) / 2)
+         publishDialog.y = Math.round(
+            (host.height - publishDialog.height) / 2)
+      })
+   }
+
+   function publication_status_text(channelId) {
+      const pid = publisher.publication_id(
+         libraryPane.selectedId, channelId)
+      if (pid.length === 0) {
+         return ""
+      }
+      const videoId = libraryStore.publication_video_id(pid)
+      if (videoId.length > 0) {
+         return videoId
+      }
+      const error = libraryStore.publication_error(pid)
+      if (error.length > 0) {
+         return error
+      }
+      return libraryStore.publication_status(pid)
    }
 
    function center_recovery_dialog() {
@@ -239,17 +357,40 @@ ApplicationWindow {
       secrets: secretStore
       transport: httpTransport
    }
+   CPublisher {
+      id: publisher
+      objectName: "publisher"
+      store: libraryStore
+      auth: channelAuth
+      transport: httpTransport
+      onFinished: shell.publishTick++
+   }
+   CStatsSync {
+      id: statsSync
+      objectName: "statsSync"
+      store: libraryStore
+      auth: channelAuth
+      transport: httpTransport
+   }
+   ListModel {
+      id: publishChannelListModel
+      objectName: "publishChannelListModel"
+   }
 
    header: HeaderBar {
       id: headerBar
       exportEnabled: projectDocument.hasClips
+      publishEnabled: libraryPane.selectedKind === "short"
+         && libraryPane.selectedId.length > 0
       channelAuth: channelAuth
       channelCount: libraryStore.channelCount
       onExportRequested: shell.run_export()
+      onPublishRequested: shell.open_publish()
       onSettingsRequested: shell.open_settings()
       onConnectChannelRequested: channelAuth.start()
       onDisconnectChannelRequested:
          channelAuth.disconnect_channel(channelId)
+      onChannelStatsRequested: shell.open_channel_stats(channelId)
    }
 
    function run_export() {
@@ -505,11 +646,25 @@ ApplicationWindow {
                }
             }
 
-            FrameView {
-               id: frameView
-               document: projectDocument
+            Item {
                Layout.fillWidth: true
                Layout.fillHeight: true
+
+               FrameView {
+                  id: frameView
+                  document: projectDocument
+                  anchors.fill: parent
+                  visible: shell.centerMode !== "analytics"
+               }
+               AnalyticsView {
+                  id: analyticsView
+                  store: libraryStore
+                  statsSync: statsSync
+                  kind: shell.analyticsKind
+                  targetId: shell.analyticsId
+                  anchors.fill: parent
+                  visible: shell.centerMode === "analytics"
+               }
             }
 
             ToolColumn {
@@ -615,6 +770,14 @@ ApplicationWindow {
       pipeline: pipeline
       onSelectedIdChanged: shell.apply_selection()
       onSelectedKindChanged: shell.apply_selection()
+      onEntryClicked: function(entryId, kind) {
+         if (kind === "short") {
+            shell.close_analytics()
+         }
+      }
+      onStatsRequested: function(shortId) {
+         shell.open_video_stats(shortId)
+      }
    }
 
    TimelineHost {
@@ -623,6 +786,7 @@ ApplicationWindow {
          : bottomDock.slot
       anchors.fill: parent
       visible: shell.panel_visible("timeline")
+         && shell.centerMode !== "analytics"
       document: projectDocument
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
@@ -785,6 +949,231 @@ ApplicationWindow {
                text: "Закрыть"
                filled: true
                onClicked: exportDialog.close()
+            }
+         }
+      }
+   }
+
+   Dialog {
+      id: publishDialog
+      objectName: "publishDialog"
+      modal: true
+      width: 440
+      title: "Публикация"
+      standardButtons: Dialog.NoButton
+      background: Rectangle {
+         objectName: "publishDialogSurface"
+         color: Theme.menu
+         radius: 12
+      }
+      onOpened: shell.center_publish_dialog()
+      contentItem: ColumnLayout {
+         spacing: 12
+         TextField {
+            id: publishTitleField
+            objectName: "publishTitleField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Название"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: publishTitleField.activeFocus ? 2 : 1
+               border.color: publishTitleField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: publishDescriptionField
+            objectName: "publishDescriptionField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Описание"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: publishDescriptionField.activeFocus
+                  ? 2 : 1
+               border.color: publishDescriptionField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         Text {
+            objectName: "publishQuotaLabel"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Theme.textSecondary
+            font.pixelSize: 12
+            text: {
+               shell.publishTick
+               return "Осталось " + libraryStore.quota_remaining() +
+                  " выгрузок сегодня. Локальный счёт, сброс в " +
+                  "полночь PT."
+            }
+         }
+         Column {
+            id: publishChannelList
+            objectName: "publishChannelList"
+            Layout.fillWidth: true
+            spacing: 8
+            RowLayout {
+               visible: firstPublishCid.length > 0
+               spacing: 8
+               Layout.fillWidth: true
+               Rectangle {
+                  id: firstChannelCheck
+                  objectName: firstPublishCid.length > 0
+                     ? "publishChannelCheck-" + firstPublishCid
+                     : "publishChannelCheck"
+                  property bool checked: false
+                  width: 20
+                  height: 20
+                  radius: 4
+                  color: checked ? Theme.fill : "transparent"
+                  border.color: Theme.outline
+                  MouseArea {
+                     anchors.fill: parent
+                     onClicked: firstChannelCheck.checked =
+                        !firstChannelCheck.checked
+                  }
+               }
+               Text {
+                  text: firstPublishCid.length > 0
+                     ? libraryStore.channel_title(firstPublishCid)
+                     : ""
+                  color: Theme.text
+                  font.pixelSize: 14
+                  Layout.fillWidth: true
+               }
+               Text {
+                  objectName: firstPublishCid.length > 0
+                     ? "publishChannelStatus-" + firstPublishCid
+                     : "publishChannelStatus"
+                  color: Theme.textSecondary
+                  font.pixelSize: 12
+                  text: {
+                     shell.publishTick
+                     return shell.publication_status_text(
+                        firstPublishCid)
+                  }
+               }
+            }
+            Repeater {
+               id: extraChannelChecks
+               model: Math.max(0, publishChannelListModel.count - 1)
+               RowLayout {
+                  property string cid:
+                     publishChannelListModel.get(index + 1).cid
+                  property alias checked: extraBox.checked
+                  spacing: 8
+                  Layout.fillWidth: true
+                  Rectangle {
+                     id: extraBox
+                     objectName: "publishChannelCheck-" + cid
+                     property bool checked: false
+                     width: 20
+                     height: 20
+                     radius: 4
+                     color: checked ? Theme.fill : "transparent"
+                     border.color: Theme.outline
+                     MouseArea {
+                        anchors.fill: parent
+                        onClicked: extraBox.checked = !extraBox.checked
+                     }
+                  }
+                  Text {
+                     text: publishChannelListModel.get(index + 1).title
+                     color: Theme.text
+                     font.pixelSize: 14
+                     Layout.fillWidth: true
+                  }
+               }
+            }
+         }
+         Row {
+            spacing: 8
+            Rectangle {
+               objectName: "publishPrivacy-private"
+               height: 32
+               width: privacyPrivateLabel.implicitWidth + 24
+               radius: 8
+               color: shell.publishPrivacy === "private"
+                  ? Theme.fill : Theme.tonal
+               Text {
+                  id: privacyPrivateLabel
+                  anchors.centerIn: parent
+                  text: "Личный"
+                  color: shell.publishPrivacy === "private"
+                     ? Theme.textInverse : Theme.text
+                  font.pixelSize: 14
+                  font.weight: 500
+               }
+               MouseArea {
+                  anchors.fill: parent
+                  onClicked: shell.publishPrivacy = "private"
+               }
+            }
+            Rectangle {
+               objectName: "publishPrivacy-unlisted"
+               height: 32
+               width: privacyUnlistedLabel.implicitWidth + 24
+               radius: 8
+               color: shell.publishPrivacy === "unlisted"
+                  ? Theme.fill : Theme.tonal
+               Text {
+                  id: privacyUnlistedLabel
+                  anchors.centerIn: parent
+                  text: "По ссылке"
+                  color: shell.publishPrivacy === "unlisted"
+                     ? Theme.textInverse : Theme.text
+                  font.pixelSize: 14
+                  font.weight: 500
+               }
+               MouseArea {
+                  anchors.fill: parent
+                  onClicked: shell.publishPrivacy = "unlisted"
+               }
+            }
+            Rectangle {
+               objectName: "publishPrivacy-public"
+               height: 32
+               width: privacyPublicLabel.implicitWidth + 24
+               radius: 8
+               color: shell.publishPrivacy === "public"
+                  ? Theme.fill : Theme.tonal
+               Text {
+                  id: privacyPublicLabel
+                  anchors.centerIn: parent
+                  text: "Открытый"
+                  color: shell.publishPrivacy === "public"
+                     ? Theme.textInverse : Theme.text
+                  font.pixelSize: 14
+                  font.weight: 500
+               }
+               MouseArea {
+                  anchors.fill: parent
+                  onClicked: shell.publishPrivacy = "public"
+               }
+            }
+         }
+         RowLayout {
+            Layout.alignment: Qt.AlignRight
+            CapsuleButton {
+               objectName: "publishCancel"
+               text: "Отмена"
+               onClicked: publishDialog.close()
+            }
+            CapsuleButton {
+               objectName: "publishConfirm"
+               text: "Опубликовать"
+               filled: true
+               onClicked: shell.confirm_publish()
             }
          }
       }

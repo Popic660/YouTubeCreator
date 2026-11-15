@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QTimeZone>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -25,7 +26,8 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
+constexpr int kDailyInsertQuota = 100;
 constexpr char kPathKey[] = "library/path";
 constexpr char kDraftStatus[] = "draft";
 constexpr char kRootBinId[] = "root";
@@ -88,17 +90,21 @@ bool CLibraryStore::open(const QString& directory) {
    } else if (version == 1) {
       migrated = migrate_from_v1() && migrate_from_v2() &&
                  migrate_from_v3() && migrate_from_v4() &&
-                 migrate_from_v5();
+                 migrate_from_v5() && migrate_from_v6();
    } else if (version == 2) {
       migrated = migrate_from_v2() && migrate_from_v3() &&
-                 migrate_from_v4() && migrate_from_v5();
+                 migrate_from_v4() && migrate_from_v5() &&
+                 migrate_from_v6();
    } else if (version == 3) {
       migrated = migrate_from_v3() && migrate_from_v4() &&
-                 migrate_from_v5();
+                 migrate_from_v5() && migrate_from_v6();
    } else if (version == 4) {
-      migrated = migrate_from_v4() && migrate_from_v5();
+      migrated = migrate_from_v4() && migrate_from_v5() &&
+                 migrate_from_v6();
    } else if (version == 5) {
-      migrated = migrate_from_v5();
+      migrated = migrate_from_v5() && migrate_from_v6();
+   } else if (version == 6) {
+      migrated = migrate_from_v6();
    } else if (version != kSchemaVersion) {
       migrated = false;
    }
@@ -1165,6 +1171,276 @@ bool CLibraryStore::remove_channel(const QString& channel_id) {
    return true;
 }
 
+int CLibraryStore::publication_count(const QString& short_id) const {
+   if (!opened_ ||
+       !schema_contains(QStringLiteral("publications"))) {
+      return 0;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   const QString id = short_id.trimmed();
+   if (id.isEmpty()) {
+      if (!query.exec("SELECT COUNT(*) FROM publications")) {
+         return 0;
+      }
+   } else {
+      query.prepare(
+          "SELECT COUNT(*) FROM publications WHERE short_id = ?");
+      query.addBindValue(id);
+      if (!query.exec()) {
+         return 0;
+      }
+   }
+   if (!query.next()) {
+      return 0;
+   }
+   return query.value(0).toInt();
+}
+
+QString CLibraryStore::publication_id_at(const QString& short_id,
+                                         int index) const {
+   if (!opened_ || index < 0 ||
+       !schema_contains(QStringLiteral("publications"))) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   const QString id = short_id.trimmed();
+   if (id.isEmpty()) {
+      if (!query.exec("SELECT id FROM publications ORDER BY id")) {
+         return {};
+      }
+   } else {
+      query.prepare("SELECT id FROM publications WHERE short_id = ? "
+                    "ORDER BY id");
+      query.addBindValue(id);
+      if (!query.exec()) {
+         return {};
+      }
+   }
+   int current = 0;
+   while (query.next()) {
+      if (current == index) {
+         return query.value(0).toString();
+      }
+      ++current;
+   }
+   return {};
+}
+
+QString CLibraryStore::publication_field(const QString& id,
+                                         const QString& column) const {
+   if (!opened_ || id.trimmed().isEmpty() ||
+       !schema_contains(QStringLiteral("publications"))) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("SELECT " + column + " FROM publications WHERE id = ?");
+   query.addBindValue(id.trimmed());
+   if (!query.exec() || !query.next()) {
+      return {};
+   }
+   return query.value(0).toString();
+}
+
+QString CLibraryStore::publication_video_id(const QString& id) const {
+   return publication_field(id, QStringLiteral("video_id"));
+}
+
+QString CLibraryStore::publication_channel_id(
+    const QString& id) const {
+   return publication_field(id, QStringLiteral("channel_id"));
+}
+
+QString CLibraryStore::publication_status(const QString& id) const {
+   return publication_field(id, QStringLiteral("status"));
+}
+
+QString CLibraryStore::publication_cover_status(
+    const QString& id) const {
+   return publication_field(id, QStringLiteral("cover_status"));
+}
+
+QString CLibraryStore::publication_privacy(const QString& id) const {
+   return publication_field(id, QStringLiteral("privacy"));
+}
+
+QString CLibraryStore::publication_error(const QString& id) const {
+   return publication_field(id, QStringLiteral("error"));
+}
+
+bool CLibraryStore::short_has_video(const QString& short_id) const {
+   if (!opened_ || short_id.trimmed().isEmpty() ||
+       !schema_contains(QStringLiteral("publications"))) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("SELECT 1 FROM publications WHERE short_id = ? "
+                 "AND video_id <> '' LIMIT 1");
+   query.addBindValue(short_id.trimmed());
+   return query.exec() && query.next();
+}
+
+bool CLibraryStore::upsert_publication(const QString& short_id,
+                                       const QString& channel_id,
+                                       const QString& video_id,
+                                       const QString& privacy,
+                                       const QString& status,
+                                       const QString& cover_status,
+                                       const QString& error) {
+   const QString clip = short_id.trimmed();
+   const QString channel = channel_id.trimmed();
+   if (!opened_ || clip.isEmpty() || channel.isEmpty() ||
+       !schema_contains(QStringLiteral("publications"))) {
+      return false;
+   }
+   const QString id =
+       QUuid::createUuid().toString(QUuid::WithoutBraces);
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "INSERT INTO publications(id, short_id, channel_id, "
+       "video_id, privacy, status, cover_status, error, "
+       "uploaded_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
+       "ON CONFLICT(short_id, channel_id) DO UPDATE SET "
+       "video_id = excluded.video_id, "
+       "privacy = excluded.privacy, status = excluded.status, "
+       "cover_status = excluded.cover_status, "
+       "error = excluded.error, "
+       "uploaded_ms = excluded.uploaded_ms");
+   query.addBindValue(id);
+   query.addBindValue(clip);
+   query.addBindValue(channel);
+   query.addBindValue(video_id.isNull() ? QStringLiteral("")
+                                        : video_id);
+   query.addBindValue(privacy.isNull() ? QStringLiteral("")
+                                       : privacy);
+   query.addBindValue(status.isNull() ? QStringLiteral("") : status);
+   query.addBindValue(cover_status.isNull() ? QStringLiteral("")
+                                           : cover_status);
+   query.addBindValue(error.isNull() ? QStringLiteral("") : error);
+   query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+   if (!query.exec()) {
+      set_last_error(query.lastError().text());
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+bool CLibraryStore::upsert_stats(const QString& kind,
+                                 const QString& target_id,
+                                 const QString& payload) {
+   const QString type = kind.trimmed();
+   const QString target = target_id.trimmed();
+   if (!opened_ || type.isEmpty() || target.isEmpty() ||
+       !schema_contains(QStringLiteral("stats_snapshots"))) {
+      return false;
+   }
+   const QString id = type + QLatin1Char(':') + target;
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "INSERT INTO stats_snapshots(id, kind, target_id, "
+       "synced_ms, payload) VALUES(?, ?, ?, ?, ?) "
+       "ON CONFLICT(id) DO UPDATE SET synced_ms = excluded.synced_ms, "
+       "payload = excluded.payload");
+   query.addBindValue(id);
+   query.addBindValue(type);
+   query.addBindValue(target);
+   query.addBindValue(QDateTime::currentMSecsSinceEpoch());
+   query.addBindValue(payload);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::stats_payload(const QString& kind,
+                                     const QString& target_id) const {
+   if (!opened_ ||
+       !schema_contains(QStringLiteral("stats_snapshots"))) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("SELECT payload FROM stats_snapshots "
+                 "WHERE kind = ? AND target_id = ?");
+   query.addBindValue(kind.trimmed());
+   query.addBindValue(target_id.trimmed());
+   if (!query.exec() || !query.next()) {
+      return {};
+   }
+   return query.value(0).toString();
+}
+
+qint64 CLibraryStore::stats_synced_ms(
+    const QString& kind, const QString& target_id) const {
+   if (!opened_ ||
+       !schema_contains(QStringLiteral("stats_snapshots"))) {
+      return 0;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("SELECT synced_ms FROM stats_snapshots "
+                 "WHERE kind = ? AND target_id = ?");
+   query.addBindValue(kind.trimmed());
+   query.addBindValue(target_id.trimmed());
+   if (!query.exec() || !query.next()) {
+      return 0;
+   }
+   return query.value(0).toLongLong();
+}
+
+QString CLibraryStore::quota_day_pt() const {
+   const QTimeZone zone(QByteArray("America/Los_Angeles"));
+   const QDateTime now = QDateTime::currentDateTimeUtc();
+   if (zone.isValid()) {
+      return now.toTimeZone(zone).date().toString(
+          QStringLiteral("yyyy-MM-dd"));
+   }
+   return now.date().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+int CLibraryStore::quota_remaining() const {
+   if (!opened_ ||
+       !schema_contains(QStringLiteral("quota_usage"))) {
+      return kDailyInsertQuota;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "SELECT insert_count FROM quota_usage WHERE day_pt = ?");
+   query.addBindValue(quota_day_pt());
+   int used = 0;
+   if (query.exec() && query.next()) {
+      used = query.value(0).toInt();
+   }
+   return std::max(0, kDailyInsertQuota - used);
+}
+
+bool CLibraryStore::increment_quota() {
+   if (!opened_ ||
+       !schema_contains(QStringLiteral("quota_usage"))) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare(
+       "INSERT INTO quota_usage(day_pt, insert_count) VALUES(?, 1) "
+       "ON CONFLICT(day_pt) DO UPDATE SET "
+       "insert_count = insert_count + 1");
+   query.addBindValue(quota_day_pt());
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+QString CLibraryStore::export_path(const QString& short_id) const {
+   if (!opened_ || root_path_.isEmpty() ||
+       short_id.trimmed().isEmpty()) {
+      return {};
+   }
+   return QDir(root_path_).filePath(
+       QStringLiteral("exports/") + short_id.trimmed() +
+       QStringLiteral(".mp4"));
+}
+
 std::vector<LibraryBin> CLibraryStore::bins() const {
    std::vector<LibraryBin> result;
    if (!opened_) {
@@ -1422,9 +1698,25 @@ bool CLibraryStore::create_schema() {
        "CREATE INDEX IF NOT EXISTS tasks_short ON tasks(short_id)",
        "CREATE TABLE IF NOT EXISTS channels ("
        "channel_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
+       "CREATE TABLE IF NOT EXISTS publications ("
+       "id TEXT PRIMARY KEY, short_id TEXT NOT NULL, "
+       "channel_id TEXT NOT NULL, "
+       "video_id TEXT NOT NULL DEFAULT '', "
+       "privacy TEXT NOT NULL, status TEXT NOT NULL, "
+       "cover_status TEXT NOT NULL DEFAULT '', "
+       "error TEXT NOT NULL DEFAULT '', "
+       "uploaded_ms INTEGER NOT NULL DEFAULT 0, "
+       "UNIQUE(short_id, channel_id))",
+       "CREATE TABLE IF NOT EXISTS stats_snapshots ("
+       "id TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+       "target_id TEXT NOT NULL, "
+       "synced_ms INTEGER NOT NULL, payload TEXT NOT NULL)",
+       "CREATE TABLE IF NOT EXISTS quota_usage ("
+       "day_pt TEXT PRIMARY KEY, "
+       "insert_count INTEGER NOT NULL DEFAULT 0)",
        "INSERT OR IGNORE INTO bins(id, parent_id, name) "
        "VALUES('root', NULL, 'Медиа')",
-       "PRAGMA user_version = 6",
+       "PRAGMA user_version = 7",
    };
    for (const QString& statement : statements) {
       if (!query.exec(statement)) {
@@ -1505,6 +1797,43 @@ bool CLibraryStore::migrate_from_v5() {
       return false;
    }
    return query.exec("PRAGMA user_version = 6");
+}
+
+bool CLibraryStore::ensure_publish_tables() {
+   QSqlDatabase database = QSqlDatabase::database(connection_name_);
+   QSqlQuery query(database);
+   const QStringList statements = {
+       "CREATE TABLE IF NOT EXISTS publications ("
+       "id TEXT PRIMARY KEY, short_id TEXT NOT NULL, "
+       "channel_id TEXT NOT NULL, "
+       "video_id TEXT NOT NULL DEFAULT '', "
+       "privacy TEXT NOT NULL, status TEXT NOT NULL, "
+       "cover_status TEXT NOT NULL DEFAULT '', "
+       "error TEXT NOT NULL DEFAULT '', "
+       "uploaded_ms INTEGER NOT NULL DEFAULT 0, "
+       "UNIQUE(short_id, channel_id))",
+       "CREATE TABLE IF NOT EXISTS stats_snapshots ("
+       "id TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+       "target_id TEXT NOT NULL, "
+       "synced_ms INTEGER NOT NULL, payload TEXT NOT NULL)",
+       "CREATE TABLE IF NOT EXISTS quota_usage ("
+       "day_pt TEXT PRIMARY KEY, "
+       "insert_count INTEGER NOT NULL DEFAULT 0)",
+   };
+   for (const QString& statement : statements) {
+      if (!query.exec(statement)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+bool CLibraryStore::migrate_from_v6() {
+   if (!ensure_publish_tables()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   return query.exec("PRAGMA user_version = 7");
 }
 
 bool CLibraryStore::interrupt_running_tasks() {

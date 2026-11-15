@@ -148,6 +148,58 @@ bool CChannelAuth::disconnect_channel(const QString& channel_id) {
    return removed;
 }
 
+QString CChannelAuth::access_token(const QString& channel_id) {
+   const QString id = channel_id.trimmed();
+   if (id.isEmpty() || secrets_ == nullptr ||
+       transport_ == nullptr) {
+      last_error_ = QStringLiteral("missing bindings");
+      emit log_changed();
+      return {};
+   }
+   const auto cached = access_tokens_.constFind(id);
+   if (cached != access_tokens_.cend()) {
+      return cached.value();
+   }
+   const QString refresh = secrets_->channel_refresh(id);
+   if (refresh.isEmpty()) {
+      last_error_ = QStringLiteral("missing refresh_token");
+      emit log_changed();
+      return {};
+   }
+   QUrlQuery query;
+   query.addQueryItem(QStringLiteral("client_id"),
+                      secrets_->google_client_id());
+   query.addQueryItem(QStringLiteral("client_secret"),
+                      secrets_->secret_google_client_secret());
+   query.addQueryItem(QStringLiteral("refresh_token"), refresh);
+   query.addQueryItem(QStringLiteral("grant_type"),
+                      QStringLiteral("refresh_token"));
+   const HttpResponse token = transport_->post(
+       QString::fromUtf8(kTokenUrl), {},
+       query.query(QUrl::FullyEncoded).toUtf8(),
+       QString::fromUtf8(kFormType));
+   if (!token.error.isEmpty() || token.status >= 400) {
+      last_error_ = http_api_message(token);
+      if (last_error_.isEmpty()) {
+         last_error_ = token.error;
+      }
+      emit log_changed();
+      return {};
+   }
+   const QJsonObject token_json =
+       QJsonDocument::fromJson(token.body).object();
+   const QString access =
+       token_json.value(QStringLiteral("access_token")).toString();
+   if (access.isEmpty()) {
+      last_error_ = QStringLiteral("missing access_token");
+      emit log_changed();
+      return {};
+   }
+   access_tokens_.insert(id, access);
+   emit log_changed();
+   return access;
+}
+
 int CChannelAuth::channel_count() const {
    if (store_ == nullptr) {
       return 0;

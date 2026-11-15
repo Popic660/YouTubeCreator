@@ -1120,4 +1120,394 @@ TestCase {
       again.close()
       paths.remove_tree(dir)
    }
+
+   function publicationOf(store, shortId, channelId) {
+      const n = store.publication_count(shortId)
+      for (let i = 0; i < n; ++i) {
+         const pid = store.publication_id_at(shortId, i)
+         if (store.publication_channel_id(pid) === channelId) {
+            return pid
+         }
+      }
+      return ""
+   }
+
+   function seedReadyShort(store, dir, name) {
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, name)
+      verify(store.set_short_status(id, "ready"))
+      verify(store.set_script(id, "Scene text"))
+      verify(paths.mkpath(dir + "/exports"))
+      verify(paths.copy_file(paths.fixture_path("vertical-short.mp4"),
+         store.export_path(id)))
+      return id
+   }
+
+   function bindChannel(store, secrets, id, title, refresh) {
+      verify(store.upsert_channel(id, title))
+      secrets.set_channel_refresh(id, refresh)
+      verify(secrets.save())
+   }
+
+   function enqueueAccess(transport, token) {
+      transport.enqueue_json(JSON.stringify({
+         access_token: token,
+         token_type: "Bearer"
+      }))
+   }
+
+   function enqueueInsert(transport, videoId) {
+      transport.enqueue_header("Location",
+         "https://upload.test/" + videoId)
+      transport.enqueue_json("{}")
+      transport.enqueue_json(JSON.stringify({ id: videoId }))
+   }
+
+   function channelStatsJson() {
+      return JSON.stringify({
+         items: [{
+            statistics: {
+               subscriberCount: "9",
+               viewCount: "100"
+            }
+         }]
+      })
+   }
+
+   function videoStatsJson() {
+      return JSON.stringify({
+         items: [{
+            statistics: {
+               viewCount: "42",
+               likeCount: "3",
+               commentCount: "1"
+            }
+         }]
+      })
+   }
+
+   function reportJson(withCtr) {
+      const headers = [
+         { name: "day" },
+         { name: "views" },
+         { name: "estimatedMinutesWatched" },
+         { name: "averageViewDuration" },
+         { name: "likes" }
+      ]
+      const row = ["2026-11-01", 5, 8, 12, 2]
+      if (withCtr) {
+         headers.push({ name: "impressions" })
+         headers.push({ name: "impressionClickThroughRate" })
+         row.push(50)
+         row.push(0.1)
+      }
+      return JSON.stringify({
+         columnHeaders: headers,
+         rows: [row]
+      })
+   }
+
+   function test_stubPutReadsLocationAndAnalyticsHost() {
+      const shell = createShell()
+      const transport = requireChild(shell, "httpTransport")
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_header("Location", "https://upload.test/put")
+      transport.enqueue_json("{}")
+      const started = transport.post(
+         "https://www.googleapis.com/upload/youtube/v3/videos",
+         "Bearer x", "{}", "application/json")
+      compare(started.location, "https://upload.test/put")
+      compare(transport.lastLocation, "https://upload.test/put")
+      transport.enqueue_json("{\"id\":\"vid\"}")
+      const put = transport.put("https://upload.test/put", "Bearer x",
+         "bytes", "video/mp4")
+      compare(put.error, "")
+      compare(transport.lastUrl, "https://upload.test/put")
+      verify(transport.urls.indexOf("https://upload.test/put") >= 0)
+      const chat = transport.chatCount
+      const kling = transport.klingCount
+      const google = transport.googleCount
+      transport.enqueue_json("{}")
+      transport.get(
+         "https://youtubeanalytics.googleapis.com/v2/reports",
+         "Bearer x")
+      compare(transport.googleCount, google + 1)
+      compare(transport.chatCount, chat)
+      compare(transport.klingCount, kling)
+   }
+
+   function test_accessTokenStaysInMemory() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      enqueueAccess(transport, "ya29.access-mem-only")
+      compare(auth.access_token("UC1"), "ya29.access-mem-only")
+      compare(auth.access_token("UC1"), "ya29.access-mem-only")
+      compare(transport.googleCount, 1)
+      verify(transport.lastBody.indexOf("grant_type=refresh_token") >= 0)
+      verify(secrets.save())
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(project.open_short(id))
+      project.save()
+      const db = paths.read_text(dir + "/library.db")
+      verify(db.indexOf("ya29.access-mem-only") < 0)
+      const json = paths.read_text(
+         dir + "/shorts/" + id + "/project.json")
+      verify(json.indexOf("ya29.access-mem-only") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_accessTokenMissingRefreshKeepsChannel() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      verify(store.upsert_channel("UC1", "Studio"))
+      transport.use_stub()
+      transport.clear()
+      const before = transport.googleCount
+      compare(auth.access_token("UC1"), "")
+      compare(store.channel_count(), 1)
+      compare(transport.googleCount, before)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.enqueue_error("token boom")
+      compare(auth.access_token("UC1"), "")
+      compare(store.channel_count(), 1)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishWithoutExportOrLongDuration() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const publisher = requireChild(shell, "publisher")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      const folder = store.create_folder("", "Film")
+      const missing = store.create_short(folder, "No File")
+      verify(store.set_short_status(missing, "ready"))
+      verify(!publisher.publish(missing, ["UC1"], "T", "D",
+         "unlisted"))
+      verify(publisher.lastError.indexOf("экспорт") >= 0)
+      compare(store.publication_count(missing), 0)
+      compare(transport.googleCount, 0)
+      const longId = seedReadyShort(store, dir, "Long")
+      verify(store.update_short_media(longId, 180001, ""))
+      verify(!publisher.publish(longId, ["UC1"], "T", "D",
+         "unlisted"))
+      verify(publisher.lastError.indexOf("длительн") >= 0)
+      compare(store.publication_count(longId), 0)
+      compare(transport.googleCount, 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishStubWritesVideoId() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      const publisher = requireChild(shell, "publisher")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      const id = seedReadyShort(store, dir, "Clip")
+      enqueueAccess(transport, "ya29.upload")
+      enqueueInsert(transport, "vid-1")
+      verify(publisher.publish(id, ["UC1"], "Title", "Desc",
+         "unlisted"), publisher.lastError)
+      const pub = publicationOf(store, id, "UC1")
+      compare(store.publication_video_id(pub), "vid-1")
+      compare(store.short_status(id), "published")
+      verify(transport.urls.join(" ").indexOf(
+         "upload/youtube/v3/videos") >= 0)
+      verify(transport.urls.indexOf("https://upload.test/vid-1") >= 0)
+      compare(auth.browserOpenCount, 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishSecondChannelAfterFirstError() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const publisher = requireChild(shell, "publisher")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "One", "1//r1")
+      bindChannel(store, secrets, "UC2", "Two", "1//r2")
+      transport.use_stub()
+      transport.clear()
+      const id = seedReadyShort(store, dir, "Clip")
+      enqueueAccess(transport, "ya29.one")
+      transport.enqueue_error("insert boom")
+      enqueueAccess(transport, "ya29.two")
+      enqueueInsert(transport, "vid-2")
+      verify(publisher.publish(id, ["UC1", "UC2"], "Title", "Desc",
+         "unlisted"), publisher.lastError)
+      const first = publicationOf(store, id, "UC1")
+      const second = publicationOf(store, id, "UC2")
+      compare(store.publication_status(first), "error")
+      verify(store.publication_error(first).length > 0)
+      compare(store.publication_video_id(second), "vid-2")
+      compare(store.short_status(id), "published")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishCoverSetAndSkipped() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const publisher = requireChild(shell, "publisher")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      const id = seedReadyShort(store, dir, "Clip")
+      const rel = "shorts/" + id + "/youtube_cover.jpg"
+      verify(paths.mkpath(dir + "/shorts/" + id))
+      verify(paths.copy_file(paths.make_image(dir),
+         dir + "/" + rel))
+      verify(store.set_cover_relpath(id, rel))
+      enqueueAccess(transport, "ya29.cover")
+      enqueueInsert(transport, "vid-set")
+      transport.enqueue_json("{}")
+      verify(publisher.publish(id, ["UC1"], "Title", "Desc",
+         "unlisted"), publisher.lastError)
+      let pub = publicationOf(store, id, "UC1")
+      compare(store.publication_video_id(pub), "vid-set")
+      compare(store.publication_cover_status(pub), "set")
+      transport.clear()
+      enqueueInsert(transport, "vid-skip")
+      transport.enqueue_status(403)
+      transport.enqueue_json(JSON.stringify({
+         error: { message: "custom thumbnail" }
+      }))
+      verify(publisher.publish(id, ["UC1"], "Title", "Desc",
+         "unlisted"))
+      pub = publicationOf(store, id, "UC1")
+      compare(store.publication_video_id(pub), "vid-skip")
+      compare(store.publication_cover_status(pub), "skipped")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_publishQuotaBlocksInsert() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const publisher = requireChild(shell, "publisher")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      const id = seedReadyShort(store, dir, "Clip")
+      for (let i = 0; i < 100; ++i) {
+         verify(store.increment_quota())
+      }
+      compare(store.quota_remaining(), 0)
+      verify(!publisher.publish(id, ["UC1"], "Title", "Desc",
+         "unlisted"))
+      verify(publisher.lastError.indexOf("квот") >= 0)
+      verify(transport.urls.join(" ").indexOf("videos.insert") < 0)
+      verify(transport.urls.join(" ").indexOf(
+         "upload/youtube/v3/videos") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_statsRefreshWritesSnapshot() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const stats = requireChild(shell, "statsSync")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      transport.use_stub()
+      transport.clear()
+      const before = transport.googleCount
+      compare(store.stats_payload("channel", "UC1"), "")
+      enqueueAccess(transport, "ya29.stats")
+      transport.enqueue_json(channelStatsJson())
+      transport.enqueue_json(reportJson(true))
+      verify(stats.refresh("channel", "UC1"))
+      verify(store.stats_payload("channel", "UC1").indexOf("100") >= 0)
+      verify(store.stats_synced_ms("channel", "UC1") > 0)
+      verify(transport.googleCount > before)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_statsMissingCtrAndNoRefreshKeepsSnapshot() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const stats = requireChild(shell, "statsSync")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      bindChannel(store, secrets, "UC1", "Studio", "1//refresh")
+      const id = seedReadyShort(store, dir, "Clip")
+      verify(store.upsert_publication(id, "UC1", "vid-1", "unlisted",
+         "uploaded", "", ""))
+      transport.use_stub()
+      transport.clear()
+      enqueueAccess(transport, "ya29.stats")
+      transport.enqueue_json(videoStatsJson())
+      transport.enqueue_json(reportJson(false))
+      verify(stats.refresh("video", "vid-1"))
+      const payload = store.stats_payload("video", "vid-1")
+      verify(payload.indexOf("нет в этом канале") >= 0)
+      verify(payload.indexOf("42") >= 0)
+      const synced = store.stats_synced_ms("video", "vid-1")
+      verify(store.upsert_channel("UC2", "Bare"))
+      transport.clear()
+      const before = transport.googleCount
+      verify(!stats.refresh("channel", "UC2"))
+      compare(store.stats_payload("video", "vid-1"), payload)
+      compare(store.stats_synced_ms("video", "vid-1"), synced)
+      compare(transport.googleCount, before)
+      store.close()
+      paths.remove_tree(dir)
+   }
 }

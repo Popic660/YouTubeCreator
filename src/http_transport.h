@@ -16,6 +16,7 @@ struct HttpResponse {
    int status = 0;
    QByteArray body;
    QString error;
+   QString location;
 };
 
 /**
@@ -39,6 +40,8 @@ class CHttpTransport : public QObject {
    Q_PROPERTY(QString lastUrl READ last_url NOTIFY log_changed)
    Q_PROPERTY(QString lastBody READ last_body_text NOTIFY log_changed)
    Q_PROPERTY(QStringList urls READ urls NOTIFY log_changed)
+   Q_PROPERTY(QString lastLocation READ last_location
+                  NOTIFY log_changed)
 
  public:
    /**
@@ -54,6 +57,7 @@ class CHttpTransport : public QObject {
    int google_count() const { return google_count_; }
    QString last_url() const { return last_url_; }
    QStringList urls() const { return urls_; }
+   QString last_location() const { return last_location_; }
    QString last_body_text() const {
       return QString::fromUtf8(last_body_);
    }
@@ -82,6 +86,20 @@ class CHttpTransport : public QObject {
    Q_INVOKABLE void enqueue_error(const QString& error);
 
    /**
+    * @brief Заголовок для следующего ответа заглушки.
+    * @param name - имя, например Location.
+    * @param value - значение.
+    */
+   Q_INVOKABLE void enqueue_header(const QString& name,
+                                   const QString& value);
+
+   /**
+    * @brief HTTP-статус для следующего ответа заглушки.
+    * @param status - код, например 403.
+    */
+   Q_INVOKABLE void enqueue_status(int status);
+
+   /**
     * @brief Сбрасывает очередь и счётчики.
     */
    Q_INVOKABLE void clear();
@@ -106,7 +124,22 @@ class CHttpTransport : public QObject {
     */
    HttpResponse post(const QString& url, const QString& bearer,
                      const QByteArray& body,
-                     const QString& content_type = QString());
+                     const QString& content_type = QString(),
+                     const QVariantMap& headers = QVariantMap());
+
+   /**
+    * @brief Выполняет PUT.
+    * @param url - адрес.
+    * @param bearer - ключ или пусто.
+    * @param body - тело.
+    * @param content_type - тип тела или пусто.
+    * @param headers - сырые заголовки.
+    * @return ответ или ошибка.
+    */
+   HttpResponse put(const QString& url, const QString& bearer,
+                    const QByteArray& body,
+                    const QString& content_type = QString(),
+                    const QVariantMap& headers = QVariantMap());
 
    /**
     * @brief POST для QML-тестов.
@@ -139,6 +172,19 @@ class CHttpTransport : public QObject {
    Q_INVOKABLE QVariantMap get(const QString& url,
                                const QString& bearer);
 
+   /**
+    * @brief PUT для QML-тестов.
+    * @param url - адрес.
+    * @param bearer - ключ или пусто.
+    * @param body - тело.
+    * @param content_type - тип или пусто.
+    * @return status, body, error, location.
+    */
+   Q_INVOKABLE QVariantMap put(const QString& url,
+                               const QString& bearer,
+                               const QString& body,
+                               const QString& content_type);
+
  signals:
    /**
     * @brief Журнал запросов изменился.
@@ -154,7 +200,9 @@ class CHttpTransport : public QObject {
    HttpResponse take_stub();
    HttpResponse live(const QString& method, const QString& url,
                      const QString& bearer, const QByteArray& body,
-                     const QString& content_type);
+                     const QString& content_type,
+                     const QVariantMap& headers);
+   void apply_pending_headers(HttpResponse* response);
    void record(const QString& url, const QByteArray& body);
    static QVariantMap to_map(const HttpResponse& response);
 
@@ -166,7 +214,10 @@ class CHttpTransport : public QObject {
    int kling_count_ = 0;
    int google_count_ = 0;
    QString last_url_;
+   QString last_location_;
    QByteArray last_body_;
    QStringList urls_;
+   QString pending_location_;
+   int pending_status_ = 0;
    std::vector<HttpResponse> queue_;
 };
