@@ -9,6 +9,9 @@ Rectangle {
    readonly property int audioCount: document ? document.audioCount : 0
    readonly property int itemCount: document ? document.itemCount : 0
    property string panelId: "timeline"
+   property string dropTrack: ""
+   readonly property bool shortOpen: document !== null
+      && document.shortId.length > 0
    signal panelDragStarted()
    signal panelDragFinished()
    implicitHeight: Theme.timelineHeight
@@ -38,6 +41,86 @@ Rectangle {
 
    function clipLength(id) {
       return Math.max(0, document.clip_out(id) - document.clip_in(id))
+   }
+
+   function has_open_short() {
+      return shortOpen
+   }
+
+   function track_from_y(py) {
+      if (py < 40) {
+         return "v1"
+      }
+      if (py < 80) {
+         return "v2"
+      }
+      return "a1"
+   }
+
+   function track_compatible(kind, track) {
+      if (kind === "audio") {
+         return track === "a1"
+      }
+      if (kind === "video" || kind === "image") {
+         return track === "v1" || track === "v2"
+      }
+      return false
+   }
+
+   function is_junction(track, timeMs) {
+      if (document === null) {
+         return false
+      }
+      const duration = Math.max(1, document.durationMs)
+      const threshold = Math.max(
+         80, Math.round(8 * duration / plotSpan()))
+      for (let i = 0; i < document.itemCount; ++i) {
+         const id = document.clip_id_at(i)
+         if (document.clip_track(id) !== track) {
+            continue
+         }
+         const start = document.clip_start(id)
+         const end = start + clipLength(id)
+         if (Math.abs(timeMs - start) <= threshold ||
+             Math.abs(timeMs - end) <= threshold) {
+            return true
+         }
+      }
+      return false
+   }
+
+   function default_kind_track(kind) {
+      if (kind === "audio") {
+         return "a1"
+      }
+      if (kind === "image") {
+         return "v2"
+      }
+      return "v1"
+   }
+
+   function drop_asset_on(assetId, kind, track, timeMs) {
+      if (!has_open_short() || !assetId || kind === "bin") {
+         return ""
+      }
+      let dest = track
+      if (!track_compatible(kind, dest)) {
+         dest = ""
+      }
+      let time = Math.max(0, timeMs)
+      if (DockState.snapEnabled) {
+         const duration = Math.max(1, document.durationMs)
+         time = document.snap_ms(time, duration / plotSpan())
+      }
+      const junctionTrack = dest.length > 0
+         ? dest : default_kind_track(kind)
+      const insert = is_junction(junctionTrack, time)
+      return document.place_asset(assetId, dest, time, insert)
+   }
+
+   function handle_asset_drop(assetId, kind, x, y) {
+      return drop_asset_on(
+         assetId, kind, track_from_y(y), xToTime(x))
    }
 
    function clipAt(px, py) {
@@ -157,17 +240,13 @@ Rectangle {
       anchors.right: parent.right
       anchors.top: timelineHandle.bottom
       anchors.margins: 8
-      visible: timelineHost.clipCount === 0 && timelineHost.audioCount === 0
+      visible: !timelineHost.shortOpen
       color: Theme.textSecondary
       font.pixelSize: 12
       wrapMode: Text.WordWrap
-      text: "Как работает таймлайн. 1) Импортируйте файл в панель " +
-         "«Медиа», создайте ролик в папке и перенесите ассет на " +
-         "дорожку. 2) Красная линия — текущее время; клик или " +
-         "протяжка по дорожке перематывает кадр. 3) Треугольник " +
-         "справа (или клик по кадру) — пуск со звуком. 4) Цветные " +
-         "блоки — клипы; клик по блоку выделяет его. 5) Лезвие режет " +
-         "по линии. Экспорт — белая кнопка в шапке."
+      text: "Сначала откройте ролик в правом дереве. Затем " +
+         "перетащите видео, звук или картинку из панели «Медиа» " +
+         "на дорожку. Без открытого ролика клип не появится."
    }
 
    Row {
@@ -177,7 +256,7 @@ Rectangle {
       anchors.bottom: parent.bottom
       anchors.margins: 8
       spacing: 8
-      visible: timelineHost.clipCount > 0 || timelineHost.audioCount > 0
+      visible: timelineHost.shortOpen
 
       Column {
          width: 28
@@ -216,6 +295,48 @@ Rectangle {
             TrackRow {
                objectName: "trackA1"
                trackName: "a1"
+            }
+         }
+
+         Text {
+            objectName: "timelineDropHint"
+            anchors.fill: parent
+            anchors.margins: 8
+            visible: timelineHost.clipCount === 0
+               && timelineHost.audioCount === 0
+            z: 2
+            color: Theme.textSecondary
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            text: "Перетащите файл из «Медиа» на дорожку. " +
+               "Видео — на V1, картинка — на V2, звук — на A1."
+         }
+
+         DropArea {
+            id: assetDrop
+            objectName: "timelineAssetDrop"
+            anchors.fill: parent
+            z: 5
+            keys: ["asset"]
+            onEntered: function(drag) {
+               timelineHost.dropTrack =
+                  timelineHost.track_from_y(drag.y)
+            }
+            onPositionChanged: function(drag) {
+               timelineHost.dropTrack =
+                  timelineHost.track_from_y(drag.y)
+            }
+            onExited: timelineHost.dropTrack = ""
+            onDropped: function(drop) {
+               timelineHost.dropTrack = ""
+               if (drop.source && drop.source.entryId) {
+                  timelineHost.handle_asset_drop(
+                     drop.source.entryId,
+                     drop.source.kind,
+                     drop.x,
+                     drop.y)
+                  drop.acceptProposedAction()
+               }
             }
          }
 
@@ -295,8 +416,11 @@ Rectangle {
       width: parent.width
       height: 36
       radius: 4
-      color: Theme.raised
-      border.color: Theme.outline
+      color: timelineHost.dropTrack === trackName
+         ? Theme.selected : Theme.raised
+      border.width: timelineHost.dropTrack === trackName ? 2 : 1
+      border.color: timelineHost.dropTrack === trackName
+         ? Theme.link : Theme.outline
    }
 
    component SliderLike: MouseArea {

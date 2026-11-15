@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QUrl>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -15,6 +16,14 @@
 namespace {
 
 QByteArray g_memory_blob;
+
+constexpr char kGroqOpenAiV1[] = "https://api.groq.com/openai/v1";
+constexpr char kOpenAiHost[] = "api.openai.com";
+
+bool is_openai_host(const QString& url) {
+   return QUrl(url).host().compare(QLatin1String(kOpenAiHost),
+                                   Qt::CaseInsensitive) == 0;
+}
 
 }  // namespace
 
@@ -62,7 +71,53 @@ void CSecretStore::set_api_key(const QString& key) {
       return;
    }
    api_key_ = clean;
+   align_groq_key_host();
    emit settings_changed();
+}
+
+QString CSecretStore::api_key_hint() const {
+   if (api_key_.isEmpty()) {
+      return {};
+   }
+   if (api_key_.size() <= 12) {
+      return QStringLiteral("••••");
+   }
+   return api_key_.left(8) + QStringLiteral("…") + api_key_.right(4);
+}
+
+bool CSecretStore::has_groq_key() const {
+   return api_key_.startsWith(QLatin1String("gsk_"));
+}
+
+bool CSecretStore::align_groq_key_host() {
+   if (!has_groq_key() || !is_openai_host(base_url_)) {
+      return false;
+   }
+   base_url_ = QString::fromLatin1(kGroqOpenAiV1);
+   return true;
+}
+
+QString CSecretStore::chat_root() const {
+   const QString root = base_url_.trimmed();
+   if (has_groq_key() && is_openai_host(root)) {
+      return QString::fromLatin1(kGroqOpenAiV1);
+   }
+   return root;
+}
+
+QString CSecretStore::openai_url(const QString& suffix) const {
+   QString root = chat_root();
+   while (root.endsWith(QLatin1Char('/'))) {
+      root.chop(1);
+   }
+   QString path = suffix.trimmed();
+   while (path.startsWith(QLatin1Char('/'))) {
+      path.remove(0, 1);
+   }
+   if (root.endsWith(QLatin1String("/v1"))) {
+      return root + QLatin1Char('/') + path;
+   }
+   return root + QStringLiteral("/v1/") + path;
 }
 
 void CSecretStore::set_kling_base_url(const QString& url) {
@@ -306,11 +361,16 @@ bool CSecretStore::load() {
    if (!decode_blob(blob)) {
       return false;
    }
+   if (align_groq_key_host()) {
+      save();
+      return true;
+   }
    emit settings_changed();
    return true;
 }
 
 bool CSecretStore::save() {
+   align_groq_key_host();
    const QByteArray plain = encode_blob();
    if (memory_) {
       g_memory_blob = plain;

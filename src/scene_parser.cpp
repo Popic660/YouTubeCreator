@@ -61,6 +61,7 @@ std::vector<Scene> parse_scenes(const QString& script) {
       const QJsonObject item = value.toObject();
       Scene scene;
       scene.prompt = item.value(QStringLiteral("prompt")).toString();
+      scene.line = item.value(QStringLiteral("line")).toString();
       const int duration =
           item.value(QStringLiteral("duration_s")).toInt(
               kDefaultDurationS);
@@ -80,6 +81,7 @@ QVariantList CSceneParser::parse(const QString& script) const {
    for (const Scene& scene : parse_scenes(script)) {
       QVariantMap item;
       item.insert(QStringLiteral("prompt"), scene.prompt);
+      item.insert(QStringLiteral("line"), scene.line);
       item.insert(QStringLiteral("duration_s"), scene.duration_s);
       list.append(item);
    }

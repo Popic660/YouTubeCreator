@@ -126,6 +126,39 @@ TestCase {
       verify(secrets.hasKey)
       compare(requireChild(shell, "settingsKeyField").text, "")
       compare(secrets.apiKey, "")
+      button.clicked()
+      tryVerify(function() { return dialog.visible })
+      const keyField = requireChild(shell, "settingsKeyField")
+      compare(keyField.placeholderText,
+         "Вставьте новый ключ, чтобы заменить")
+      const hint = requireChild(shell, "settingsKeyHint")
+      verify(hint.text.indexOf("Пустое поле") >= 0)
+      keyField.text = "gsk-from-ui"
+      requireChild(shell, "settingsSave").clicked()
+      verify(secrets.hasKey)
+      compare(keyField.text, "")
+   }
+
+   function test_settingsDialogWarnsGroqKeyOnOpenaiHost() {
+      const shell = createShell()
+      const secrets = requireChild(shell, "secretStore")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.baseUrl = "https://api.openai.com"
+      secrets.apiKey = "gsk_4EOLxxxxxxxxxxxxxxxxxwoPm"
+      const button = requireChild(shell, "settingsButton")
+      button.clicked()
+      const dialog = requireChild(shell, "settingsDialog")
+      tryVerify(function() { return dialog.visible })
+      const hint = requireChild(shell, "settingsKeyHint")
+      verify(hint.text.indexOf("gsk_4EOL") >= 0)
+      verify(hint.text.indexOf("Пустое поле") >= 0)
+      const urlHint = requireChild(shell, "settingsChatUrlHint")
+      verify(urlHint.text.indexOf("api.groq.com") >= 0)
+      requireChild(shell, "settingsBaseField").text =
+         "https://api.openai.com"
+      verify(hint.text.indexOf("нельзя слать на OpenAI") >= 0)
+      compare(hint.color, "#ff5577")
    }
 
    function test_settingsDialogSavesHasKlingKey() {

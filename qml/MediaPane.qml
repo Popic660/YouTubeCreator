@@ -13,6 +13,7 @@ Rectangle {
    property string selectedId: ""
    property string selectedKind: ""
    property string panelId: "media"
+   property bool draggingAsset: false
    readonly property int rowCount: mediaModel ? mediaModel.count : 0
    signal panelDragStarted()
    signal panelDragFinished()
@@ -91,9 +92,11 @@ Rectangle {
       }
 
       Flickable {
+         id: mediaFlick
          Layout.fillWidth: true
          Layout.fillHeight: true
          clip: true
+         interactive: !pane.draggingAsset
          contentWidth: width
          contentHeight: pane.gridMode ? gridWrap.implicitHeight
                                       : listColumn.implicitHeight
@@ -109,6 +112,7 @@ Rectangle {
                model: pane.mediaModel
                delegate: Item {
                   id: row
+                  objectName: kind === "bin" ? "" : "mediaAssetRow"
                   readonly property string entryId: model.entryId
                   readonly property string kind: model.kind
                   readonly property string name: model.name
@@ -119,6 +123,22 @@ Rectangle {
                   readonly property int durationMs: model.durationMs || 0
                   width: listColumn.width
                   height: 40
+
+                  Item {
+                     id: ghost
+                     objectName: row.kind === "bin"
+                        ? "" : "mediaDragGhost"
+                     width: 1
+                     height: 1
+                     property string entryId: row.entryId
+                     property string kind: row.kind
+                     Drag.keys: ["asset"]
+                     Drag.active: hover.drag.active
+                        && row.kind !== "bin"
+                     Drag.source: ghost
+                     Drag.hotSpot.x: 1
+                     Drag.hotSpot.y: 1
+                  }
 
                   Rectangle {
                      anchors.fill: parent
@@ -170,11 +190,23 @@ Rectangle {
                      id: hover
                      anchors.fill: parent
                      hoverEnabled: true
+                     preventStealing: row.kind !== "bin"
+                     drag.target: row.kind === "bin" ? null : ghost
+                     drag.threshold: 12
                      onClicked: {
                         pane.select_entry(row.entryId, row.kind)
                         if (row.kind === "bin") {
                            pane.mediaModel.toggle_id(row.entryId)
                         }
+                     }
+                     onPressed: {
+                        if (row.kind !== "bin") {
+                           pane.draggingAsset = false
+                        }
+                     }
+                     drag.onActiveChanged: {
+                        pane.draggingAsset = hover.drag.active
+                           && row.kind !== "bin"
                      }
                   }
                }
@@ -190,9 +222,24 @@ Rectangle {
             Repeater {
                model: pane.mediaModel
                delegate: Item {
+                  id: card
                   visible: model.kind !== "bin"
                   width: 96
                   height: 128
+
+                  Item {
+                     id: cardGhost
+                     objectName: "mediaDragGhost"
+                     width: 1
+                     height: 1
+                     property string entryId: model.entryId
+                     property string kind: model.kind
+                     Drag.keys: ["asset"]
+                     Drag.active: cardDrag.drag.active
+                     Drag.source: cardGhost
+                     Drag.hotSpot.x: 1
+                     Drag.hotSpot.y: 1
+                  }
 
                   Rectangle {
                      id: thumb
@@ -204,12 +251,21 @@ Rectangle {
                      clip: true
 
                      MouseArea {
+                        id: cardDrag
                         anchors.fill: parent
                         hoverEnabled: true
+                        preventStealing: true
+                        drag.target: cardGhost
+                        drag.threshold: 12
+                        onClicked: pane.select_entry(
+                           model.entryId, model.kind)
                         onPositionChanged: function(mouse) {
                            pane.hover_scrub(
                               mouse.x, thumb.width,
                               model.durationMs || 0)
+                        }
+                        drag.onActiveChanged: {
+                           pane.draggingAsset = cardDrag.drag.active
                         }
                      }
 

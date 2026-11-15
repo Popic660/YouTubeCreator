@@ -54,21 +54,33 @@ Item {
       id: proxy
       width: 1
       height: 1
+      property string panelId: chrome.panelId
       Drag.keys: ["panel"]
-      Drag.source: chrome
+      Drag.source: proxy
       Drag.active: press.drag.active
-      Drag.hotSpot.x: press.mouseX
-      Drag.hotSpot.y: press.mouseY
+      Drag.hotSpot.x: 0
+      Drag.hotSpot.y: 0
+      Drag.supportedActions: Qt.MoveAction
    }
 
    MouseArea {
       id: press
+      objectName: chrome.panelId + "ChromeDrag"
       anchors.fill: parent
+      acceptedButtons: Qt.LeftButton
+      preventStealing: true
       drag.target: proxy
-      drag.threshold: 4
+      drag.threshold: 8
       cursorShape: Qt.SizeAllCursor
       z: 1
-      onPressed: chrome.panelDragStarted()
-      onReleased: chrome.panelDragFinished()
+      drag.onActiveChanged: {
+         if (press.drag.active) {
+            chrome.panelDragStarted()
+         } else {
+            Qt.callLater(function() {
+               chrome.panelDragFinished()
+            })
+         }
+      }
    }
 }

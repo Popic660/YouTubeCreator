@@ -35,6 +35,22 @@ Rectangle {
       selectedKind = kind
    }
 
+   function activate_entry(entryId, kind, mouse) {
+      select_entry(entryId, kind)
+      entryClicked(entryId, kind)
+      if (mouse && mouse.button === Qt.RightButton) {
+         if (kind === "short") {
+            open_short_menu(entryId)
+         } else {
+            open_menu(entryId)
+         }
+         return
+      }
+      if (kind === "folder" && libraryModel !== null) {
+         libraryModel.toggle_id(entryId)
+      }
+   }
+
    function apply_library_folder(value) {
       if (store !== null && store.open(value)) {
          store.remember()
@@ -51,6 +67,21 @@ Rectangle {
          dialog.x = Math.round((host.width - dialog.width) / 2)
          dialog.y = Math.round((host.height - dialog.height) / 2)
       })
+   }
+
+   function format_char_count(count) {
+      const n = Math.max(0, count)
+      const mod100 = n % 100
+      const mod10 = n % 10
+      let word = "символов"
+      if (mod100 < 11 || mod100 > 14) {
+         if (mod10 === 1) {
+            word = "символ"
+         } else if (mod10 >= 2 && mod10 <= 4) {
+            word = "символа"
+         }
+      }
+      return n + " " + word
    }
 
    function handle_drop(sourceId, sourceKind, targetFolderId) {
@@ -104,14 +135,14 @@ Rectangle {
       inheritedPrompt.text = parentId.length === 0
          ? ""
          : store.effective_prompt(parentId)
-      promptField.text = store.folder_prompt(menuFolderId)
+      promptEditor.text = store.folder_prompt(menuFolderId)
       center_dialog(promptDialog)
       promptDialog.open()
    }
 
    function accept_prompt() {
       if (store !== null) {
-         store.set_folder_prompt(menuFolderId, promptField.text)
+         store.set_folder_prompt(menuFolderId, promptEditor.text)
       }
       promptDialog.close()
    }
@@ -138,7 +169,7 @@ Rectangle {
       if (store === null || confirmShortId.length === 0) {
          return
       }
-      topicField.text = store.short_topic(confirmShortId)
+      topicEditor.text = store.short_topic(confirmShortId)
       center_dialog(topicDialog)
       topicDialog.open()
    }
@@ -148,8 +179,8 @@ Rectangle {
          topicDialog.close()
          return
       }
-      store.set_topic(confirmShortId, topicField.text)
-      if (topicField.text.trim().length === 0) {
+      store.set_topic(confirmShortId, topicEditor.text)
+      if (topicEditor.text.trim().length === 0) {
          topicDialog.close()
          return
       }
@@ -196,6 +227,72 @@ Rectangle {
          font.pixelSize: 16
          leftPadding: 16
          verticalAlignment: Text.AlignVCenter
+      }
+   }
+
+   component CountedTextArea: ColumnLayout {
+      id: counted
+      spacing: 8
+      property alias text: area.text
+      property alias placeholderText: area.placeholderText
+      property string fieldObjectName: ""
+      property string frameObjectName: ""
+      property string scrollObjectName: ""
+      property string countObjectName: ""
+
+      Rectangle {
+         id: fieldFrame
+         objectName: counted.frameObjectName
+         Layout.fillWidth: true
+         implicitHeight: 240
+         Layout.preferredHeight: 240
+         radius: 4
+         color: "transparent"
+         border.width: area.activeFocus ? 2 : 1
+         border.color: area.activeFocus ? Theme.link : Theme.outline
+         clip: true
+
+         Flickable {
+            id: flick
+            objectName: counted.scrollObjectName
+            anchors.fill: parent
+            anchors.margins: 2
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+
+            TextArea.flickable: TextArea {
+               id: area
+               objectName: counted.fieldObjectName
+               wrapMode: TextEdit.Wrap
+               selectByMouse: true
+               persistentSelection: true
+               font.pixelSize: 14
+               color: Theme.text
+               placeholderTextColor: Theme.textDisabled
+               leftPadding: 12
+               rightPadding: 12
+               topPadding: 8
+               bottomPadding: 8
+               background: Item {}
+            }
+
+            ScrollBar.vertical: ScrollBar {
+               policy: ScrollBar.AsNeeded
+            }
+            ScrollBar.horizontal: ScrollBar {
+               policy: ScrollBar.AlwaysOff
+            }
+         }
+      }
+
+      Text {
+         id: countText
+         objectName: counted.countObjectName
+         Layout.fillWidth: true
+         color: Theme.textSecondary
+         font.pixelSize: 12
+         text: pane.format_char_count(area.text.length)
       }
    }
 
@@ -316,7 +413,7 @@ Rectangle {
                height: 1
                property string entryId: row.entryId
                property string kind: row.kind
-               Drag.active: dragArea.drag.active
+               Drag.active: dragArea.drag.active || shortDrag.drag.active
                Drag.source: ghost
                Drag.hotSpot.x: 1
                Drag.hotSpot.y: 1
@@ -397,74 +494,103 @@ Rectangle {
                   visible: kind === "short"
                   width: 96
                   spacing: 4
-                  Rectangle {
-                     objectName: "shortPlaceholder"
-                     visible: !row.hasPoster
-                     width: 72
-                     height: 128
-                     radius: 12
-                     color: Theme.raised
-                  }
-                  Rectangle {
-                     objectName: row.hasPoster ? "shortPreview" : ""
-                     visible: row.hasPoster
-                     width: 72
-                     height: 128
-                     radius: 12
-                     clip: true
-                     color: Theme.canvas
-                     layer.enabled: true
-                     layer.smooth: true
-                     Image {
-                        anchors.fill: parent
-                        source: row.hasPoster
-                           ? "file:///" + String(row.posterPath).replace(/\\/g, "/")
-                           : ""
-                        fillMode: Image.PreserveAspectCrop
-                     }
-                     Loader {
-                        active: row.hasPoster
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        anchors.margins: 4
-                        sourceComponent: Rectangle {
-                           objectName: "durationBadge"
-                           height: 20
-                           width: badgeText.implicitWidth + 8
-                           radius: 4
-                           color: Theme.badge
-                           Text {
-                              id: badgeText
-                              objectName: "durationText"
-                              anchors.centerIn: parent
-                              text: {
-                                 const total = Math.floor(
-                                    row.durationMs / 1000)
-                                 const minutes = Math.floor(total / 60)
-                                 const seconds = total % 60
-                                 return minutes + ":"
-                                    + (seconds < 10 ? "0" : "")
-                                    + seconds
-                              }
-                              color: Theme.badgeText
-                              font.pixelSize: 12
-                              font.weight: 500
+                  Item {
+                     id: shortHead
+                     width: 96
+                     height: headCol.implicitHeight
+                     Column {
+                        id: headCol
+                        width: 96
+                        spacing: 4
+                        Rectangle {
+                           objectName: "shortPlaceholder"
+                           visible: !row.hasPoster
+                           width: 72
+                           height: 128
+                           radius: 12
+                           color: Theme.raised
+                        }
+                        Rectangle {
+                           objectName: row.hasPoster
+                              ? "shortPreview" : ""
+                           visible: row.hasPoster
+                           width: 72
+                           height: 128
+                           radius: 12
+                           clip: true
+                           color: Theme.canvas
+                           layer.enabled: true
+                           layer.smooth: true
+                           Image {
+                              anchors.fill: parent
+                              source: row.hasPoster
+                                 ? "file:///" + String(
+                                    row.posterPath).replace(
+                                       /\\/g, "/")
+                                 : ""
+                              fillMode: Image.PreserveAspectCrop
                            }
+                           Loader {
+                              active: row.hasPoster
+                              anchors.right: parent.right
+                              anchors.bottom: parent.bottom
+                              anchors.margins: 4
+                              sourceComponent: Rectangle {
+                                 objectName: "durationBadge"
+                                 height: 20
+                                 width: badgeText.implicitWidth + 8
+                                 radius: 4
+                                 color: Theme.badge
+                                 Text {
+                                    id: badgeText
+                                    objectName: "durationText"
+                                    anchors.centerIn: parent
+                                    text: {
+                                       const total = Math.floor(
+                                          row.durationMs / 1000)
+                                       const minutes = Math.floor(
+                                          total / 60)
+                                       const seconds = total % 60
+                                       return minutes + ":"
+                                          + (seconds < 10
+                                             ? "0" : "")
+                                          + seconds
+                                    }
+                                    color: Theme.badgeText
+                                    font.pixelSize: 12
+                                    font.weight: 500
+                                 }
+                              }
+                           }
+                        }
+                        Text {
+                           objectName: "shortTitle"
+                           width: 72
+                           text: row.name
+                           color: Theme.text
+                           font.pixelSize: 14
+                           font.weight: 500
+                           wrapMode: Text.WordWrap
+                           maximumLineCount: 2
+                           elide: Text.ElideRight
+                        }
+                     }
+                     MouseArea {
+                        id: shortDrag
+                        objectName: "shortDrag"
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton |
+                           Qt.RightButton
+                        drag.target: ghost
+                        drag.threshold: 12
+                        onClicked: function(mouse) {
+                           pane.activate_entry(
+                              row.entryId, row.kind, mouse)
                         }
                      }
                   }
-                  Text {
-                     objectName: "shortTitle"
-                     width: 72
-                     text: row.name
-                     color: Theme.text
-                     font.pixelSize: 14
-                     font.weight: 500
-                     wrapMode: Text.WordWrap
-                     maximumLineCount: 2
-                     elide: Text.ElideRight
-                  }
                   Loader {
+                     id: pipelineLoader
                      active: kind === "short"
                      width: 96
                      sourceComponent: Column {
@@ -545,25 +671,17 @@ Rectangle {
 
             MouseArea {
                id: dragArea
-               anchors.fill: parent
-               anchors.rightMargin: kind === "folder" ? 40 : 0
+               anchors.left: parent.left
+               anchors.top: parent.top
+               height: parent.height
+               width: kind === "folder"
+                  ? parent.width - 40
+                  : 8 + row.depth * 16 + 24
                acceptedButtons: Qt.LeftButton | Qt.RightButton
                drag.target: ghost
                drag.threshold: 12
                onClicked: function(mouse) {
-                  pane.select_entry(row.entryId, row.kind)
-                  pane.entryClicked(row.entryId, row.kind)
-                  if (mouse.button === Qt.RightButton) {
-                     if (row.kind === "short") {
-                        pane.open_short_menu(row.entryId)
-                     } else {
-                        pane.open_menu(row.entryId)
-                     }
-                     return
-                  }
-                  if (row.kind === "folder") {
-                     pane.libraryModel.toggle_id(row.entryId)
-                  }
+                  pane.activate_entry(row.entryId, row.kind, mouse)
                }
             }
 
@@ -745,7 +863,8 @@ Rectangle {
       id: promptDialog
       objectName: "promptDialog"
       modal: true
-      width: 320
+      width: 520
+      padding: 16
       standardButtons: Dialog.NoButton
       background: Rectangle {
          color: Theme.menu
@@ -755,29 +874,52 @@ Rectangle {
       contentItem: ColumnLayout {
          spacing: 12
          Text {
-            id: inheritedPrompt
-            objectName: "inheritedPrompt"
+            objectName: "promptDialogTitle"
             Layout.fillWidth: true
-            visible: text.length > 0
+            color: Theme.text
+            font.pixelSize: 20
+            font.weight: 700
+            wrapMode: Text.WordWrap
+            text: "Введите промт для папки"
+         }
+         Text {
+            objectName: "promptDialogHint"
+            Layout.fillWidth: true
             color: Theme.textSecondary
             font.pixelSize: 12
             wrapMode: Text.WordWrap
+            text: "Общий стиль шортсов для роликов в папке."
          }
-         TextField {
-            id: promptField
-            objectName: "promptField"
+         Flickable {
+            id: inheritedScroll
+            objectName: "inheritedPromptScroll"
+            visible: inheritedPrompt.text.length > 0
             Layout.fillWidth: true
-            implicitHeight: 40
-            font.pixelSize: 14
-            color: Theme.text
-            placeholderTextColor: Theme.textDisabled
-            background: Rectangle {
-               radius: 4
-               color: "transparent"
-               border.width: promptField.activeFocus ? 2 : 1
-               border.color: promptField.activeFocus
-                  ? Theme.link : Theme.outline
+            implicitHeight: Math.min(
+               inheritedPrompt.implicitHeight, 96)
+            Layout.preferredHeight: implicitHeight
+            contentWidth: width
+            contentHeight: inheritedPrompt.height
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            Text {
+               id: inheritedPrompt
+               objectName: "inheritedPrompt"
+               width: inheritedScroll.width
+               color: Theme.textSecondary
+               font.pixelSize: 12
+               wrapMode: Text.WordWrap
             }
+         }
+         CountedTextArea {
+            id: promptEditor
+            Layout.fillWidth: true
+            placeholderText: "Стиль, аудитория и назначение роликов"
+            fieldObjectName: "promptField"
+            frameObjectName: "promptFieldFrame"
+            scrollObjectName: "promptScroll"
+            countObjectName: "promptCharCount"
          }
          RowLayout {
             Layout.alignment: Qt.AlignRight
@@ -800,7 +942,8 @@ Rectangle {
       id: topicDialog
       objectName: "topicDialog"
       modal: true
-      width: 320
+      width: 520
+      padding: 16
       standardButtons: Dialog.NoButton
       background: Rectangle {
          color: Theme.menu
@@ -809,22 +952,31 @@ Rectangle {
       onOpened: pane.center_dialog(this)
       contentItem: ColumnLayout {
          spacing: 12
-         TextField {
-            id: topicField
-            objectName: "topicField"
+         Text {
+            objectName: "topicDialogTitle"
             Layout.fillWidth: true
-            implicitHeight: 40
-            font.pixelSize: 14
             color: Theme.text
-            placeholderText: "Тема ролика"
-            placeholderTextColor: Theme.textDisabled
-            background: Rectangle {
-               radius: 4
-               color: "transparent"
-               border.width: topicField.activeFocus ? 2 : 1
-               border.color: topicField.activeFocus
-                  ? Theme.link : Theme.outline
-            }
+            font.pixelSize: 20
+            font.weight: 700
+            wrapMode: Text.WordWrap
+            text: "Введите тему и голос для видео"
+         }
+         Text {
+            objectName: "topicDialogHint"
+            Layout.fillWidth: true
+            color: Theme.textSecondary
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            text: "О чём этот ролик. Стиль берётся из промта папки."
+         }
+         CountedTextArea {
+            id: topicEditor
+            Layout.fillWidth: true
+            placeholderText: "О чём этот ролик и какой голос"
+            fieldObjectName: "topicField"
+            frameObjectName: "topicFieldFrame"
+            scrollObjectName: "topicScroll"
+            countObjectName: "topicCharCount"
          }
          RowLayout {
             Layout.alignment: Qt.AlignRight
