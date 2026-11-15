@@ -25,7 +25,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 5;
+constexpr int kSchemaVersion = 6;
 constexpr char kPathKey[] = "library/path";
 constexpr char kDraftStatus[] = "draft";
 constexpr char kRootBinId[] = "root";
@@ -87,14 +87,18 @@ bool CLibraryStore::open(const QString& directory) {
       migrated = create_schema();
    } else if (version == 1) {
       migrated = migrate_from_v1() && migrate_from_v2() &&
-                 migrate_from_v3() && migrate_from_v4();
+                 migrate_from_v3() && migrate_from_v4() &&
+                 migrate_from_v5();
    } else if (version == 2) {
       migrated = migrate_from_v2() && migrate_from_v3() &&
-                 migrate_from_v4();
+                 migrate_from_v4() && migrate_from_v5();
    } else if (version == 3) {
-      migrated = migrate_from_v3() && migrate_from_v4();
+      migrated = migrate_from_v3() && migrate_from_v4() &&
+                 migrate_from_v5();
    } else if (version == 4) {
-      migrated = migrate_from_v4();
+      migrated = migrate_from_v4() && migrate_from_v5();
+   } else if (version == 5) {
+      migrated = migrate_from_v5();
    } else if (version != kSchemaVersion) {
       migrated = false;
    }
@@ -1073,6 +1077,94 @@ int CLibraryStore::bin_count() const {
    return static_cast<int>(bins().size());
 }
 
+int CLibraryStore::channel_count() const {
+   if (!opened_ || !schema_contains(QStringLiteral("channels"))) {
+      return 0;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   if (!query.exec("SELECT COUNT(*) FROM channels") ||
+       !query.next()) {
+      return 0;
+   }
+   return query.value(0).toInt();
+}
+
+QString CLibraryStore::channel_id_at(int index) const {
+   if (!opened_ || index < 0 ||
+       !schema_contains(QStringLiteral("channels"))) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   if (!query.exec("SELECT channel_id FROM channels "
+                   "ORDER BY title, channel_id")) {
+      return {};
+   }
+   int current = 0;
+   while (query.next()) {
+      if (current == index) {
+         return query.value(0).toString();
+      }
+      ++current;
+   }
+   return {};
+}
+
+QString CLibraryStore::channel_title(const QString& channel_id) const {
+   if (!opened_ || channel_id.trimmed().isEmpty() ||
+       !schema_contains(QStringLiteral("channels"))) {
+      return {};
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("SELECT title FROM channels WHERE channel_id = ?");
+   query.addBindValue(channel_id.trimmed());
+   if (!query.exec() || !query.next()) {
+      return {};
+   }
+   return query.value(0).toString();
+}
+
+QString CLibraryStore::channel_title_at(int index) const {
+   return channel_title(channel_id_at(index));
+}
+
+bool CLibraryStore::upsert_channel(const QString& channel_id,
+                                   const QString& title) {
+   const QString id = channel_id.trimmed();
+   const QString name = title.trimmed();
+   if (!opened_ || id.isEmpty() || name.isEmpty() ||
+       !schema_contains(QStringLiteral("channels"))) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("INSERT INTO channels(channel_id, title) "
+                 "VALUES(?, ?) "
+                 "ON CONFLICT(channel_id) DO UPDATE SET title = "
+                 "excluded.title");
+   query.addBindValue(id);
+   query.addBindValue(name);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
+bool CLibraryStore::remove_channel(const QString& channel_id) {
+   const QString id = channel_id.trimmed();
+   if (!opened_ || id.isEmpty() ||
+       !schema_contains(QStringLiteral("channels"))) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("DELETE FROM channels WHERE channel_id = ?");
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
 std::vector<LibraryBin> CLibraryStore::bins() const {
    std::vector<LibraryBin> result;
    if (!opened_) {
@@ -1328,9 +1420,11 @@ bool CLibraryStore::create_schema() {
        "error TEXT NOT NULL DEFAULT '', "
        "created_ms INTEGER NOT NULL DEFAULT 0)",
        "CREATE INDEX IF NOT EXISTS tasks_short ON tasks(short_id)",
+       "CREATE TABLE IF NOT EXISTS channels ("
+       "channel_id TEXT PRIMARY KEY, title TEXT NOT NULL)",
        "INSERT OR IGNORE INTO bins(id, parent_id, name) "
        "VALUES('root', NULL, 'Медиа')",
-       "PRAGMA user_version = 5",
+       "PRAGMA user_version = 6",
    };
    for (const QString& statement : statements) {
       if (!query.exec(statement)) {
@@ -1400,6 +1494,17 @@ bool CLibraryStore::migrate_from_v4() {
       return false;
    }
    return query.exec("PRAGMA user_version = 5");
+}
+
+bool CLibraryStore::migrate_from_v5() {
+   QSqlDatabase database = QSqlDatabase::database(connection_name_);
+   QSqlQuery query(database);
+   if (!query.exec("CREATE TABLE IF NOT EXISTS channels ("
+                   "channel_id TEXT PRIMARY KEY, "
+                   "title TEXT NOT NULL)")) {
+      return false;
+   }
+   return query.exec("PRAGMA user_version = 6");
 }
 
 bool CLibraryStore::interrupt_running_tasks() {

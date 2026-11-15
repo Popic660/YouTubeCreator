@@ -12,7 +12,7 @@ ApplicationWindow {
    color: Theme.canvas
    property bool windowIconReady: false
 
-   readonly property bool channelConnected: false
+   readonly property bool channelConnected: libraryStore.channelCount > 0
    readonly property string libraryDock: DockState.libraryDock
    readonly property string timelineDock: DockState.timelineDock
    readonly property string mediaDock: DockState.mediaDock
@@ -232,12 +232,24 @@ ApplicationWindow {
       secrets: secretStore
       transport: httpTransport
    }
+   CChannelAuth {
+      id: channelAuth
+      objectName: "channelAuth"
+      store: libraryStore
+      secrets: secretStore
+      transport: httpTransport
+   }
 
    header: HeaderBar {
       id: headerBar
       exportEnabled: projectDocument.hasClips
+      channelAuth: channelAuth
+      channelCount: libraryStore.channelCount
       onExportRequested: shell.run_export()
       onSettingsRequested: shell.open_settings()
+      onConnectChannelRequested: channelAuth.start()
+      onDisconnectChannelRequested:
+         channelAuth.disconnect_channel(channelId)
    }
 
    function run_export() {
@@ -249,6 +261,7 @@ ApplicationWindow {
    function open_settings() {
       settingsKeyField.text = ""
       settingsKlingKeyField.text = ""
+      settingsGoogleSecretField.text = ""
       center_settings_dialog()
       settingsDialog.open()
    }
@@ -277,9 +290,15 @@ ApplicationWindow {
       if (settingsKlingKeyField.text.length > 0) {
          secretStore.klingApiKey = settingsKlingKeyField.text
       }
+      secretStore.googleClientId = settingsGoogleIdField.text
+      if (settingsGoogleSecretField.text.length > 0) {
+         secretStore.googleClientSecret =
+            settingsGoogleSecretField.text
+      }
       secretStore.save()
       settingsKeyField.text = ""
       settingsKlingKeyField.text = ""
+      settingsGoogleSecretField.text = ""
       settingsDialog.close()
    }
 
@@ -792,6 +811,8 @@ ApplicationWindow {
          settingsKlingBaseField.text = secretStore.klingBaseUrl
          settingsKlingModelField.text = secretStore.klingModel
          settingsKlingKeyField.text = ""
+         settingsGoogleIdField.text = secretStore.googleClientId
+         settingsGoogleSecretField.text = ""
          shell.center_settings_dialog()
       }
       contentItem: ColumnLayout {
@@ -936,6 +957,44 @@ ApplicationWindow {
                color: "transparent"
                border.width: settingsKlingKeyField.activeFocus ? 2 : 1
                border.color: settingsKlingKeyField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsGoogleIdField
+            objectName: "settingsGoogleIdField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            placeholderText: "Google client id"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsGoogleIdField.activeFocus ? 2 : 1
+               border.color: settingsGoogleIdField.activeFocus
+                  ? Theme.link : Theme.outline
+            }
+         }
+         TextField {
+            id: settingsGoogleSecretField
+            objectName: "settingsGoogleSecretField"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            font.pixelSize: 14
+            color: Theme.text
+            echoMode: TextInput.Password
+            placeholderText: secretStore.hasGoogleSecret
+               ? "Секрет Google задан"
+               : "Секрет Google"
+            placeholderTextColor: Theme.textDisabled
+            background: Rectangle {
+               radius: 4
+               color: "transparent"
+               border.width: settingsGoogleSecretField.activeFocus
+                  ? 2 : 1
+               border.color: settingsGoogleSecretField.activeFocus
                   ? Theme.link : Theme.outline
             }
          }

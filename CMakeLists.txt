@@ -158,6 +158,8 @@ qt_add_qml_module(creator_qml
     src/video_tool.cpp
     src/cover_tool.h
     src/cover_tool.cpp
+    src/channel_auth.h
+    src/channel_auth.cpp
   QML_FILES
     qml/Main.qml
     qml/Theme.qml

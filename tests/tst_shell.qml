@@ -163,8 +163,41 @@ TestCase {
       compare(mark.color, "#ff0033")
       compare(mark.isPlayIcon, false)
       compare(shell.channelConnected, false)
+      verify(requireChild(shell, "channelHint").text.indexOf(
+         "заглушка") < 0)
       requireChild(shell, "channelMenuButton").clicked()
       compare(shell.channelConnected, false)
+      const menu = requireChild(shell, "channelMenu")
+      tryVerify(function() { return menu.visible })
+      compare(requireChild(shell, "channelMenuSurface").color,
+         "#282828")
+      verify(requireChild(shell, "connectChannelItem").visible)
+      verify(findChild(shell, "channelLinkField") === null)
+   }
+
+   function test_settingsDialogSavesGoogleClient() {
+      const shell = createShell()
+      requireChild(shell, "settingsButton").clicked()
+      const dialog = requireChild(shell, "settingsDialog")
+      tryVerify(function() { return dialog.visible })
+      compare(requireChild(shell, "settingsDialogSurface").color,
+         "#282828")
+      compare(requireChild(shell, "settingsGoogleSecretField")
+         .background.radius, 4)
+      compare(requireChild(shell, "settingsSave").height, 40)
+      const secrets = requireChild(shell, "secretStore")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      requireChild(shell, "settingsGoogleIdField").text =
+         "google-from-ui"
+      requireChild(shell, "settingsGoogleSecretField").text =
+         "google-secret-from-ui"
+      requireChild(shell, "settingsSave").clicked()
+      verify(secrets.hasGoogleClient)
+      compare(requireChild(shell, "settingsGoogleSecretField").text, "")
+      compare(secrets.googleClientSecret, "")
+      compare(requireChild(shell, "settingsGoogleSecretField")
+         .placeholderText, "Секрет Google задан")
    }
 
    function test_geometryRestored() {
