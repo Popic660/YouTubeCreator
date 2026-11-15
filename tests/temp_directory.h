@@ -61,6 +61,13 @@ class CTempDirectory : public QObject {
    Q_INVOKABLE bool seed_schema_v3(const QString& directory);
 
    /**
+    * @brief Создаёт library.db схемы 4 с темой и сценарием.
+    * @param directory - папка библиотеки.
+    * @return true, если файл записан.
+    */
+   Q_INVOKABLE bool seed_schema_v4(const QString& directory);
+
+   /**
     * @brief Пишет PNG-картинку во временную папку.
     * @param directory - каталог.
     * @return путь файла.
@@ -133,4 +140,18 @@ class CTempDirectory : public QObject {
     * @return пиксели.
     */
    Q_INVOKABLE int video_height(const QString& path) const;
+
+   /**
+    * @brief Ширина картинки.
+    * @param path - путь.
+    * @return пиксели.
+    */
+   Q_INVOKABLE int image_width(const QString& path) const;
+
+   /**
+    * @brief Высота картинки.
+    * @param path - путь.
+    * @return пиксели.
+    */
+   Q_INVOKABLE int image_height(const QString& path) const;
 };

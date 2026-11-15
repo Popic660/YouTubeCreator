@@ -590,12 +590,13 @@ TestCase {
    }
 
    function chatJson(text) {
-      return "{\"choices\":[{\"message\":{\"content\":\"" +
-         text + "\"}}]}"
+      return JSON.stringify({
+         choices: [{ message: { content: text } }]
+      })
    }
 
    function waitStopped(pipeline) {
-      tryVerify(function() { return !pipeline.running }, 5000)
+      tryVerify(function() { return !pipeline.running }, 15000)
    }
 
    function test_pipelinePlacesVoiceWithoutNewShort() {
@@ -669,6 +670,192 @@ TestCase {
       store.close()
       ctx.store.close()
       paths.remove_tree(ctx.dir)
+   }
+
+   function klingCreate(id) {
+      return JSON.stringify({
+         code: 0,
+         data: { id: id, task_id: id, status: "submitted" }
+      })
+   }
+
+   function klingVideoDone(id, url) {
+      return JSON.stringify({
+         code: 0,
+         data: [{
+            id: id,
+            status: "succeeded",
+            outputs: [{ type: "video", url: url }]
+         }]
+      })
+   }
+
+   function klingImageCreate(id) {
+      return JSON.stringify({
+         code: 0,
+         data: { task_id: id, task_status: "submitted" }
+      })
+   }
+
+   function klingImageDone(id, url) {
+      return JSON.stringify({
+         code: 0,
+         data: {
+            task_id: id,
+            task_status: "succeed",
+            task_result: { images: [{ url: url }] }
+         }
+      })
+   }
+
+   function enqueueScene(transport, id) {
+      transport.enqueue_json(klingCreate(id))
+      transport.enqueue_json(klingVideoDone(
+         id, "https://cdn.test/" + id + ".mp4"))
+      transport.enqueue_file(paths.fixture_path("vertical-short.mp4"))
+   }
+
+   function enqueueCover(transport, dir) {
+      transport.enqueue_json(klingImageCreate("img-1"))
+      transport.enqueue_json(klingImageDone(
+         "img-1", "https://cdn.test/cover.png"))
+      transport.enqueue_file(paths.make_image(dir))
+   }
+
+   function saveBothKeys(secrets) {
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.load()
+      secrets.apiKey = "sk-test"
+      secrets.klingApiKey = "kling-secret-key"
+      verify(secrets.save())
+   }
+
+   function test_placeAssetCopyAudioFalseKeepsVoice() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(project.open_short(id))
+      const audio = store.import_media("", paths.make_wav(dir))
+      verify(project.place_asset(audio, "a1", 0, false).length > 0)
+      const video = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      verify(project.place_asset(video, "v1", 0, false, false)
+         .length > 0)
+      compare(project.clip_count_on("a1"), 1)
+      compare(project.clip_asset_id(project.first_clip_on("a1")), audio)
+      compare(project.clip_count_on("v1"), 1)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_posterUsesFirstClipNotLast() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(project.open_short(id))
+      const fixture = paths.fixture_path("vertical-short.mp4")
+      const first = store.import_media("", fixture)
+      const second = store.import_media("", fixture)
+      verify(project.place_asset(first, "v1", 0, false, false)
+         .length > 0)
+      const length = project.clip_out(project.first_clip_on("v1")) -
+         project.clip_in(project.first_clip_on("v1"))
+      verify(project.place_asset(second, "v1", length, false, false)
+         .length > 0)
+      verify(store.short_has_poster(id))
+      verify(paths.file_exists(dir + "/shorts/" + id + "/poster.png"))
+      verify(store.short_duration_ms(id) > 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_pipelinePlacesSceneClipsWithoutNewShort() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      saveBothKeys(secrets)
+      transport.use_stub()
+      transport.clear()
+      const script = JSON.stringify({
+         scenes: [
+            { prompt: "A", duration_s: 5 },
+            { prompt: "B", duration_s: 8 }
+         ]
+      })
+      transport.enqueue_json(chatJson(script))
+      transport.enqueue_file(paths.make_wav(dir))
+      enqueueScene(transport, "t1")
+      enqueueScene(transport, "t2")
+      enqueueCover(transport, dir)
+      const folder = store.create_folder("", "Film")
+      const shortsBefore = store.short_count()
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "Topic"))
+      verify(project.open_short(id))
+      verify(pipeline.run(id))
+      waitStopped(pipeline)
+      compare(store.short_count(), shortsBefore + 1)
+      compare(project.clip_count_on("v1"), 2)
+      verify(project.first_clip_on("a1").length > 0)
+      const rel = store.asset_relpath(project.clip_asset_id(
+         project.first_clip_on("v1")))
+      verify(rel.indexOf("media/") === 0)
+      verify(paths.file_exists(dir + "/" + rel))
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_twoSceneClipsAreBackToBack() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      saveBothKeys(secrets)
+      transport.use_stub()
+      transport.clear()
+      const script = JSON.stringify({
+         scenes: [
+            { prompt: "A", duration_s: 5 },
+            { prompt: "B", duration_s: 8 }
+         ]
+      })
+      transport.enqueue_json(chatJson(script))
+      transport.enqueue_file(paths.make_wav(dir))
+      enqueueScene(transport, "t1")
+      enqueueScene(transport, "t2")
+      enqueueCover(transport, dir)
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "Topic"))
+      verify(project.open_short(id))
+      verify(pipeline.run(id))
+      waitStopped(pipeline)
+      compare(project.clip_count_on("v1"), 2)
+      const first = project.clip_on_at("v1", 0)
+      const second = project.clip_on_at("v1", 1)
+      const firstEnd = project.clip_start(first) +
+         (project.clip_out(first) - project.clip_in(first))
+      compare(project.clip_start(second), firstEnd)
+      store.close()
+      paths.remove_tree(dir)
    }
 
    function test_exportUsesSameDocument() {

@@ -128,6 +128,33 @@ TestCase {
       compare(secrets.apiKey, "")
    }
 
+   function test_settingsDialogSavesHasKlingKey() {
+      const shell = createShell()
+      const button = requireChild(shell, "settingsButton")
+      button.clicked()
+      const dialog = requireChild(shell, "settingsDialog")
+      tryVerify(function() { return dialog.visible })
+      compare(requireChild(shell, "settingsDialogSurface").color,
+         "#282828")
+      compare(requireChild(shell, "settingsKlingKeyField")
+         .background.radius, 4)
+      compare(requireChild(shell, "settingsSave").height, 40)
+      const secrets = requireChild(shell, "secretStore")
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      requireChild(shell, "settingsKlingBaseField").text =
+         "https://api-singapore.klingai.com"
+      requireChild(shell, "settingsKlingModelField").text =
+         "kling-4.0-flash"
+      requireChild(shell, "settingsKlingKeyField").text = "kling-from-ui"
+      requireChild(shell, "settingsSave").clicked()
+      verify(secrets.hasKlingKey)
+      compare(requireChild(shell, "settingsKlingKeyField").text, "")
+      compare(secrets.klingApiKey, "")
+      compare(requireChild(shell, "settingsKlingKeyField")
+         .placeholderText, "Ключ Kling задан")
+   }
+
    function test_brandAndChannels() {
       const shell = createShell()
       const mark = requireChild(shell, "brandMark")

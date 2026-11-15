@@ -25,7 +25,9 @@ QString CChatTool::run(const QString& topic, const QString& prompt,
    user_message.insert(
        QStringLiteral("content"),
        QStringLiteral("Тема: ") + topic +
-           QStringLiteral("\nНапиши сценарий вертикального шортса."));
+           QStringLiteral(
+               "\nНапиши сценарий вертикального шортса JSON "
+               "{\"scenes\":[{\"prompt\":\"...\",\"duration_s\":5}]}"));
    QJsonArray messages;
    messages.append(system_message);
    messages.append(user_message);

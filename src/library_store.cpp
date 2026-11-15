@@ -25,7 +25,7 @@
 
 namespace {
 
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 5;
 constexpr char kPathKey[] = "library/path";
 constexpr char kDraftStatus[] = "draft";
 constexpr char kRootBinId[] = "root";
@@ -87,11 +87,14 @@ bool CLibraryStore::open(const QString& directory) {
       migrated = create_schema();
    } else if (version == 1) {
       migrated = migrate_from_v1() && migrate_from_v2() &&
-                 migrate_from_v3();
+                 migrate_from_v3() && migrate_from_v4();
    } else if (version == 2) {
-      migrated = migrate_from_v2() && migrate_from_v3();
+      migrated = migrate_from_v2() && migrate_from_v3() &&
+                 migrate_from_v4();
    } else if (version == 3) {
-      migrated = migrate_from_v3();
+      migrated = migrate_from_v3() && migrate_from_v4();
+   } else if (version == 4) {
+      migrated = migrate_from_v4();
    } else if (version != kSchemaVersion) {
       migrated = false;
    }
@@ -580,6 +583,43 @@ QString CLibraryStore::short_poster_path(const QString& id) const {
    return {};
 }
 
+QString CLibraryStore::short_cover_relpath(const QString& id) const {
+   for (const LibraryShort& clip : shorts()) {
+      if (clip.id == id) {
+         return clip.cover_relpath;
+      }
+   }
+   return {};
+}
+
+QString CLibraryStore::short_cover_path(const QString& id) const {
+   const QString relative = short_cover_relpath(id);
+   if (relative.isEmpty() || !opened_) {
+      return {};
+   }
+   const QString path = QDir(root_path_).filePath(relative);
+   if (!QFileInfo::exists(path)) {
+      return {};
+   }
+   return path;
+}
+
+bool CLibraryStore::set_cover_relpath(const QString& id,
+                                      const QString& cover_relpath) {
+   if (!opened_ || short_name(id).isEmpty()) {
+      return false;
+   }
+   QSqlQuery query(QSqlDatabase::database(connection_name_));
+   query.prepare("UPDATE shorts SET cover_relpath = ? WHERE id = ?");
+   query.addBindValue(cover_relpath);
+   query.addBindValue(id);
+   if (!query.exec()) {
+      return false;
+   }
+   notify_changed();
+   return true;
+}
+
 bool CLibraryStore::update_short_media(
     const QString& id, qint64 duration_ms,
     const QString& poster_relpath) {
@@ -726,8 +766,8 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
    }
    QSqlQuery query(QSqlDatabase::database(connection_name_));
    if (!query.exec("SELECT id, folder_id, name, status, "
-                   "duration_ms, poster_relpath, topic, script "
-                   "FROM shorts")) {
+                   "duration_ms, poster_relpath, topic, script, "
+                   "cover_relpath FROM shorts")) {
       return result;
    }
    while (query.next()) {
@@ -740,6 +780,7 @@ std::vector<LibraryShort> CLibraryStore::shorts() const {
       clip.poster_relpath = query.value(5).toString();
       clip.topic = query.value(6).toString();
       clip.script = query.value(7).toString();
+      clip.cover_relpath = query.value(8).toString();
       result.push_back(clip);
    }
    return result;
@@ -1259,7 +1300,8 @@ bool CLibraryStore::create_schema() {
        "duration_ms INTEGER NOT NULL DEFAULT 0, "
        "poster_relpath TEXT NOT NULL DEFAULT '', "
        "topic TEXT NOT NULL DEFAULT '', "
-       "script TEXT NOT NULL DEFAULT '')",
+       "script TEXT NOT NULL DEFAULT '', "
+       "cover_relpath TEXT NOT NULL DEFAULT '')",
        "CREATE INDEX IF NOT EXISTS shorts_name ON shorts(name)",
        "CREATE INDEX IF NOT EXISTS shorts_folder "
        "ON shorts(folder_id)",
@@ -1288,7 +1330,7 @@ bool CLibraryStore::create_schema() {
        "CREATE INDEX IF NOT EXISTS tasks_short ON tasks(short_id)",
        "INSERT OR IGNORE INTO bins(id, parent_id, name) "
        "VALUES('root', NULL, 'Медиа')",
-       "PRAGMA user_version = 4",
+       "PRAGMA user_version = 5",
    };
    for (const QString& statement : statements) {
       if (!query.exec(statement)) {
@@ -1348,6 +1390,16 @@ bool CLibraryStore::migrate_from_v3() {
       return false;
    }
    return query.exec("PRAGMA user_version = 4");
+}
+
+bool CLibraryStore::migrate_from_v4() {
+   QSqlDatabase database = QSqlDatabase::database(connection_name_);
+   QSqlQuery query(database);
+   if (!query.exec("ALTER TABLE shorts ADD COLUMN cover_relpath "
+                   "TEXT NOT NULL DEFAULT ''")) {
+      return false;
+   }
+   return query.exec("PRAGMA user_version = 5");
 }
 
 bool CLibraryStore::interrupt_running_tasks() {

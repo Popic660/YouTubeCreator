@@ -478,12 +478,44 @@ QString CProjectDocument::clip_asset_id(const QString& clip_id) const {
 }
 
 QString CProjectDocument::first_clip_on(const QString& track) const {
+   const TimelineClip* clip = earliest_on(track);
+   return clip == nullptr ? QString() : clip->id;
+}
+
+int CProjectDocument::clip_count_on(const QString& track) const {
+   return count_track(track);
+}
+
+QString CProjectDocument::clip_on_at(const QString& track,
+                                     int index) const {
+   std::vector<const TimelineClip*> items;
    for (const TimelineClip& clip : clips_) {
       if (clip.track == track) {
-         return clip.id;
+         items.push_back(&clip);
       }
    }
-   return {};
+   std::sort(items.begin(), items.end(),
+             [](const TimelineClip* left, const TimelineClip* right) {
+                return left->start_ms < right->start_ms;
+             });
+   if (index < 0 || index >= static_cast<int>(items.size())) {
+      return {};
+   }
+   return items.at(static_cast<size_t>(index))->id;
+}
+
+const TimelineClip* CProjectDocument::earliest_on(
+    const QString& track) const {
+   const TimelineClip* best = nullptr;
+   for (const TimelineClip& clip : clips_) {
+      if (clip.track != track) {
+         continue;
+      }
+      if (best == nullptr || clip.start_ms < best->start_ms) {
+         best = &clip;
+      }
+   }
+   return best;
 }
 
 QString CProjectDocument::clip_abs_path(const QString& clip_id) const {
@@ -701,7 +733,8 @@ void CProjectDocument::write_waveform(const QString& asset_id,
 
 QString CProjectDocument::place_asset(const QString& asset_id,
                                       const QString& track,
-                                      qint64 start_ms, bool insert) {
+                                      qint64 start_ms, bool insert,
+                                      bool copy_audio) {
    if (store_ == nullptr || short_id_.isEmpty()) {
       return {};
    }
@@ -750,12 +783,16 @@ QString CProjectDocument::place_asset(const QString& asset_id,
        QDir(store_->root_path()).filePath(asset.relpath);
    if (asset.kind == QLatin1String("video") &&
        dest == QLatin1String("v1")) {
-      const QString poster = write_poster(short_id_, abs);
-      store_->update_short_media(short_id_,
-                                 std::max(duration_ms(), length),
-                                 poster);
+      const TimelineClip* first = earliest_on(QStringLiteral("v1"));
+      if (first != nullptr) {
+         const QString poster_file =
+             QDir(store_->root_path()).filePath(first->file);
+         const QString poster =
+             write_poster(short_id_, poster_file);
+         store_->update_short_media(short_id_, duration_ms(), poster);
+      }
       const MediaInfo info = CMediaIo::probe(abs);
-      if (info.has_audio) {
+      if (copy_audio && info.has_audio) {
          const QString audio_track = QStringLiteral("a1");
          if (insert) {
             for (TimelineClip& item : clips_) {

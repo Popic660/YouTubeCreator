@@ -126,11 +126,13 @@ class CProjectDocument : public QObject {
     * @param track - v1, v2, a1 или пусто.
     * @param start_ms - старт на таймлайне.
     * @param insert - вставка со сдвигом хвоста.
+    * @param copy_audio - копировать звук видео на a1.
     * @return id клипа или пусто.
     */
    Q_INVOKABLE QString place_asset(const QString& asset_id,
                                    const QString& track,
-                                   qint64 start_ms, bool insert);
+                                   qint64 start_ms, bool insert,
+                                   bool copy_audio = true);
 
    /**
     * @brief Закрывает первый разрыв на дорожке выбора.
@@ -349,6 +351,22 @@ class CProjectDocument : public QObject {
    Q_INVOKABLE QString first_clip_on(const QString& track) const;
 
    /**
+    * @brief Число клипов на дорожке.
+    * @param track - v1, v2 или a1.
+    * @return число клипов.
+    */
+   Q_INVOKABLE int clip_count_on(const QString& track) const;
+
+   /**
+    * @brief Клип дорожки по порядку старта.
+    * @param track - v1, v2 или a1.
+    * @param index - индекс с нуля.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString clip_on_at(const QString& track,
+                                  int index) const;
+
+   /**
     * @brief Абсолютный путь файла клипа.
     * @param clip_id - клип.
     * @return путь или пусто.
@@ -410,6 +428,7 @@ class CProjectDocument : public QObject {
    TimelineClip* mutable_clip(const QString& id);
    const TimelineClip* clip_by_id(const QString& id) const;
    int count_track(const QString& track) const;
+   const TimelineClip* earliest_on(const QString& track) const;
    void push_undo();
    void load_json();
    QJsonObject to_json() const;

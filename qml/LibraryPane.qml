@@ -403,15 +403,23 @@ Rectangle {
                      radius: 12
                      color: Theme.raised
                   }
-                  Image {
+                  Rectangle {
                      objectName: row.hasPoster ? "shortPreview" : ""
                      visible: row.hasPoster
                      width: 72
                      height: 128
-                     source: row.hasPoster
-                        ? "file:///" + String(row.posterPath).replace(/\\/g, "/")
-                        : ""
-                     fillMode: Image.PreserveAspectCrop
+                     radius: 12
+                     clip: true
+                     color: Theme.canvas
+                     layer.enabled: true
+                     layer.smooth: true
+                     Image {
+                        anchors.fill: parent
+                        source: row.hasPoster
+                           ? "file:///" + String(row.posterPath).replace(/\\/g, "/")
+                           : ""
+                        fillMode: Image.PreserveAspectCrop
+                     }
                      Loader {
                         active: row.hasPoster
                         anchors.right: parent.right
