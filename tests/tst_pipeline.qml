@@ -100,6 +100,32 @@ TestCase {
       verify(secrets.save())
    }
 
+   function tokenJson(refresh) {
+      return JSON.stringify({
+         access_token: "ya29.test",
+         refresh_token: refresh,
+         token_type: "Bearer"
+      })
+   }
+
+   function channelsListJson(id, title) {
+      return JSON.stringify({
+         items: [{ id: id, snippet: { title: title } }]
+      })
+   }
+
+   function enqueueConnect(transport, id, title, refresh) {
+      transport.enqueue_json(tokenJson(refresh))
+      transport.enqueue_json(channelsListJson(id, title))
+   }
+
+   function saveGoogleClient(secrets) {
+      resetSecrets(secrets)
+      secrets.googleClientId = "google-client-id"
+      secrets.googleClientSecret = "google-client-secret"
+      verify(secrets.save())
+   }
+
    function saveBothKeys(secrets) {
       saveChatKey(secrets)
       secrets.klingApiKey = "kling-secret-key"
@@ -447,6 +473,24 @@ TestCase {
       paths.remove_tree(dir)
    }
 
+   function test_stubFormPostCountsGoogle() {
+      const transport = requireChild(createShell(), "httpTransport")
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_json(tokenJson("1//refresh"))
+      const result = transport.post(
+         "https://oauth2.googleapis.com/token", "",
+         "code=abc&grant_type=authorization_code",
+         "application/x-www-form-urlencoded")
+      compare(result.status, 200)
+      compare(transport.lastUrl,
+         "https://oauth2.googleapis.com/token")
+      verify(transport.lastBody.indexOf("code=abc") >= 0)
+      compare(transport.googleCount, 1)
+      compare(transport.chatCount, 0)
+      compare(transport.klingCount, 0)
+   }
+
    function test_stubGetReadsBodyAndUrl() {
       const transport = requireChild(createShell(), "httpTransport")
       transport.use_stub()
@@ -501,6 +545,150 @@ TestCase {
       verify(json.indexOf("kling-secret-key") < 0)
       store.close()
       paths.remove_tree(dir)
+   }
+
+   function test_googleClientMemoryOmitsSecretFromLibrary() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      verify(store.open(dir))
+      const secrets = requireChild(shell, "secretStore")
+      resetSecrets(secrets)
+      secrets.apiKey = "sk-chat-key"
+      secrets.googleClientId = "google-client-id"
+      secrets.googleClientSecret = "google-client-secret"
+      secrets.set_channel_refresh("UC1", "refresh-token-secret")
+      verify(secrets.save())
+      verify(secrets.hasGoogleClient)
+      verify(secrets.hasKey)
+      compare(secrets.googleClientSecret, "")
+      compare(secrets.apiKey, "")
+      const db = paths.read_text(dir + "/library.db")
+      verify(db.indexOf("google-client-secret") < 0)
+      verify(db.indexOf("refresh-token-secret") < 0)
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      const project = requireChild(shell, "projectDocument")
+      verify(project.open_short(id))
+      project.save()
+      const json = paths.read_text(
+         dir + "/shorts/" + id + "/project.json")
+      verify(json.indexOf("google-client-secret") < 0)
+      verify(json.indexOf("refresh-token-secret") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_completeWithCodeWritesChannelWithoutBrowser() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "Studio One", "1//r1")
+      verify(auth.complete_with_code("auth-code"))
+      compare(store.channel_count(), 1)
+      compare(store.channel_title("UC1"), "Studio One")
+      verify(secrets.has_channel_refresh("UC1"))
+      compare(transport.googleCount, 2)
+      verify(transport.urls.indexOf(
+         "https://oauth2.googleapis.com/token") >= 0)
+      verify(transport.urls.join(" ").indexOf(
+         "youtube/v3/channels") >= 0)
+      compare(auth.browserOpenCount, 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_completeWithoutRefreshDoesNotWriteChannel() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      transport.enqueue_json(JSON.stringify({
+         access_token: "ya29.test",
+         token_type: "Bearer"
+      }))
+      verify(!auth.complete_with_code("auth-code"))
+      compare(store.channel_count(), 0)
+      verify(!secrets.has_channel_refresh("UC1"))
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_tokenOrListErrorDoesNotAddChannel() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      auth.use_stub()
+      transport.clear()
+      transport.enqueue_error("token boom")
+      verify(!auth.complete_with_code("auth-code"))
+      compare(store.channel_count(), 0)
+      transport.clear()
+      transport.enqueue_json(tokenJson("1//r1"))
+      transport.enqueue_error("list boom")
+      verify(!auth.complete_with_code("auth-code"))
+      compare(store.channel_count(), 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_completeWithErrorKeepsExistingChannel() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "Studio One", "1//r1")
+      verify(auth.complete_with_code("auth-code"))
+      compare(store.channel_count(), 1)
+      auth.complete_with_error()
+      compare(store.channel_count(), 1)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_googleClientReloadsWithoutSecretText() {
+      const secrets = requireChild(createShell(), "secretStore")
+      resetSecrets(secrets)
+      secrets.googleClientId = "google-reload-id"
+      secrets.googleClientSecret = "google-reload-secret"
+      verify(secrets.save())
+      const again = requireChild(createShell(), "secretStore")
+      again.use_memory(true)
+      verify(again.load())
+      compare(again.googleClientId, "google-reload-id")
+      verify(again.hasGoogleClient)
+      compare(again.googleClientSecret, "")
+      compare(again.channel_refresh("missing"), "")
+      verify(!again.has_channel_refresh("missing"))
+      verify(again.hasKey === false)
    }
 
    function test_klingKeyReloadsAddressAndModel() {

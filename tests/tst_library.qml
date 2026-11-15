@@ -88,12 +88,13 @@ TestCase {
       const dir = paths.make()
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 5)
+      compare(store.user_version(), 6)
       verify(store.schema_contains("folders"))
       verify(store.schema_contains("shorts"))
       verify(store.schema_contains("bins"))
       verify(store.schema_contains("assets"))
       verify(store.schema_contains("tasks"))
+      verify(store.schema_contains("channels"))
       verify(store.schema_contains("folders_name"))
       verify(store.schema_contains("shorts_name"))
       verify(store.schema_contains("shorts_folder"))
@@ -118,9 +119,10 @@ TestCase {
       verify(paths.seed_schema_v1(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 5)
+      compare(store.user_version(), 6)
       compare(store.folder_name("f1"), "Old")
       verify(store.schema_contains("bins"))
+      verify(store.schema_contains("channels"))
       verify(store.rootBinId.length > 0)
       const clip = store.create_short("f1", "Draft")
       compare(store.short_duration_ms(clip), 0)
@@ -134,7 +136,7 @@ TestCase {
       verify(paths.seed_schema_v2(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 5)
+      compare(store.user_version(), 6)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.asset_name("a1"), "vertical-short")
@@ -824,13 +826,14 @@ TestCase {
       verify(paths.seed_schema_v3(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 5)
+      compare(store.user_version(), 6)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.short_status("s1"), "draft")
       compare(store.short_topic("s1"), "")
       compare(store.short_script("s1"), "")
       verify(store.schema_contains("tasks"))
+      verify(store.schema_contains("channels"))
       store.close()
       paths.remove_tree(dir)
    }
@@ -840,13 +843,14 @@ TestCase {
       verify(paths.seed_schema_v4(dir))
       const store = createStore()
       verify(store.open(dir))
-      compare(store.user_version(), 5)
+      compare(store.user_version(), 6)
       compare(store.folder_name("f1"), "Old")
       compare(store.short_name("s1"), "Clip")
       compare(store.short_status("s1"), "draft")
       compare(store.short_topic("s1"), "Old topic")
       compare(store.short_script("s1"), "Old script")
       compare(store.short_cover_relpath("s1"), "")
+      verify(store.schema_contains("channels"))
       store.close()
       paths.remove_tree(dir)
    }
@@ -946,6 +950,198 @@ TestCase {
       const status = store.short_status(id)
       requireChild(shell, "topicGenerate").clicked()
       compare(store.short_status(id), status)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_migrateFromV5AddsChannels() {
+      const dir = paths.make()
+      verify(paths.seed_schema_v5(dir))
+      const store = createStore()
+      verify(store.open(dir))
+      compare(store.user_version(), 6)
+      compare(store.folder_name("f1"), "Old")
+      compare(store.short_name("s1"), "Clip")
+      compare(store.channel_count(), 0)
+      verify(store.schema_contains("channels"))
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_upsertChannelUpdatesSameId() {
+      const dir = paths.make()
+      const store = createStore()
+      verify(store.open(dir))
+      verify(store.upsert_channel("UC1", "First"))
+      verify(store.upsert_channel("UC1", "Renamed"))
+      compare(store.channel_count(), 1)
+      compare(store.channel_title("UC1"), "Renamed")
+      store.close()
+      const again = createStore()
+      verify(again.open(dir))
+      compare(again.channel_count(), 1)
+      compare(again.channel_title("UC1"), "Renamed")
+      again.close()
+      paths.remove_tree(dir)
+   }
+
+   function tokenJson(refresh) {
+      return JSON.stringify({
+         access_token: "ya29.test",
+         refresh_token: refresh,
+         token_type: "Bearer"
+      })
+   }
+
+   function channelsListJson(id, title) {
+      return JSON.stringify({
+         items: [{ id: id, snippet: { title: title } }]
+      })
+   }
+
+   function enqueueConnect(transport, id, title, refresh) {
+      transport.enqueue_json(tokenJson(refresh))
+      transport.enqueue_json(channelsListJson(id, title))
+   }
+
+   function saveGoogleClient(secrets) {
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.load()
+      secrets.googleClientId = "google-client-id"
+      secrets.googleClientSecret = "google-client-secret"
+      verify(secrets.save())
+   }
+
+   function test_twoChannelsPersistAndAreNotSearched() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      verify(store.open(dir))
+      verify(store.upsert_channel("UC1", "Alpha Channel Unique"))
+      verify(store.upsert_channel("UC2", "Beta Channel Unique"))
+      store.close()
+      const again = createStore()
+      verify(again.open(dir))
+      compare(again.channel_count(), 2)
+      compare(again.channel_title("UC1"), "Alpha Channel Unique")
+      compare(again.channel_title("UC2"), "Beta Channel Unique")
+      again.close()
+      verify(store.open(dir))
+      requireChild(shell, "searchText").text = "Alpha Channel Unique"
+      compare(requireChild(shell, "libraryModel").count, 0)
+      compare(requireChild(shell, "notFoundMessage").text,
+         "Ничего не найдено")
+      const db = paths.read_text(dir + "/library.db")
+      verify(db.indexOf("refresh-token-secret") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_startWithoutLibraryOrClientSkipsTransport() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      secrets.use_memory(true)
+      secrets.clear_memory()
+      secrets.load()
+      auth.start()
+      compare(transport.googleCount, 0)
+      compare(auth.browserOpenCount, 0)
+      verify(store.open(dir))
+      transport.clear()
+      auth.start()
+      compare(transport.googleCount, 0)
+      compare(auth.browserOpenCount, 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_secondChannelAndUpsertSameId() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "First", "1//r1")
+      verify(auth.complete_with_code("c1"))
+      enqueueConnect(transport, "UC2", "Second", "1//r2")
+      verify(auth.complete_with_code("c2"))
+      compare(store.channel_count(), 2)
+      enqueueConnect(transport, "UC1", "First Renamed", "1//r1b")
+      verify(auth.complete_with_code("c1b"))
+      compare(store.channel_count(), 2)
+      compare(store.channel_title("UC1"), "First Renamed")
+      compare(store.channel_title("UC2"), "Second")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_disconnectRemovesRowAndToken() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "First", "1//r1")
+      verify(auth.complete_with_code("c1"))
+      enqueueConnect(transport, "UC2", "Second", "1//r2")
+      verify(auth.complete_with_code("c2"))
+      const before = transport.googleCount
+      verify(auth.disconnect_channel("UC1"))
+      compare(store.channel_count(), 1)
+      compare(store.channel_title("UC2"), "Second")
+      verify(!secrets.has_channel_refresh("UC1"))
+      verify(secrets.has_channel_refresh("UC2"))
+      compare(transport.googleCount, before)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_menuDisconnectClearsLastChannel() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const auth = requireChild(shell, "channelAuth")
+      verify(store.open(dir))
+      saveGoogleClient(secrets)
+      transport.use_stub()
+      transport.clear()
+      auth.use_stub()
+      enqueueConnect(transport, "UC1", "Only", "1//r1")
+      verify(auth.complete_with_code("c1"))
+      verify(shell.channelConnected)
+      requireChild(shell, "channelMenuButton").clicked()
+      tryVerify(function() {
+         return findChild(shell, "channelItem-UC1") !== null
+      })
+      compare(requireChild(shell, "channelItem-UC1").text, "Only")
+      verify(requireChild(shell, "channelHint").text.indexOf(
+         "заглушка") < 0)
+      const item = requireChild(shell, "disconnectChannel-UC1")
+      item.clicked()
+      compare(store.channel_count(), 0)
+      compare(shell.channelConnected, false)
       store.close()
       paths.remove_tree(dir)
    }

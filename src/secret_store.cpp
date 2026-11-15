@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QStringList>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -100,6 +101,53 @@ void CSecretStore::set_kling_api_key(const QString& key) {
    emit settings_changed();
 }
 
+void CSecretStore::set_google_client_id(const QString& id) {
+   const QString clean = id.trimmed();
+   if (clean.isEmpty() || clean == google_client_id_) {
+      return;
+   }
+   google_client_id_ = clean;
+   emit settings_changed();
+}
+
+void CSecretStore::set_google_client_secret(const QString& secret) {
+   const QString clean = secret.trimmed();
+   if (clean.isEmpty()) {
+      return;
+   }
+   google_client_secret_ = clean;
+   emit settings_changed();
+}
+
+void CSecretStore::set_channel_refresh(const QString& channel_id,
+                                       const QString& token) {
+   const QString id = channel_id.trimmed();
+   const QString value = token.trimmed();
+   if (id.isEmpty() || value.isEmpty()) {
+      return;
+   }
+   channel_tokens_.insert(id, value);
+   emit settings_changed();
+}
+
+void CSecretStore::clear_channel_refresh(const QString& channel_id) {
+   const QString id = channel_id.trimmed();
+   if (id.isEmpty() || !channel_tokens_.contains(id)) {
+      return;
+   }
+   channel_tokens_.remove(id);
+   emit settings_changed();
+}
+
+QString CSecretStore::channel_refresh(const QString& channel_id) const {
+   return channel_tokens_.value(channel_id.trimmed());
+}
+
+bool CSecretStore::has_channel_refresh(
+    const QString& channel_id) const {
+   return !channel_refresh(channel_id).isEmpty();
+}
+
 void CSecretStore::use_memory(bool enabled) {
    memory_ = enabled;
 }
@@ -126,6 +174,16 @@ QByteArray CSecretStore::encode_blob() const {
    object.insert(QStringLiteral("kling_image_model"),
                  kling_image_model_);
    object.insert(QStringLiteral("kling_api_key"), kling_api_key_);
+   object.insert(QStringLiteral("google_client_id"),
+                 google_client_id_);
+   object.insert(QStringLiteral("google_client_secret"),
+                 google_client_secret_);
+   QJsonObject tokens;
+   const QStringList ids = channel_tokens_.keys();
+   for (const QString& id : ids) {
+      tokens.insert(id, channel_tokens_.value(id));
+   }
+   object.insert(QStringLiteral("channel_tokens"), tokens);
    return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
@@ -173,6 +231,17 @@ bool CSecretStore::decode_blob(const QByteArray& blob) {
    }
    kling_api_key_ =
        object.value(QStringLiteral("kling_api_key")).toString();
+   google_client_id_ =
+       object.value(QStringLiteral("google_client_id")).toString();
+   google_client_secret_ =
+       object.value(QStringLiteral("google_client_secret")).toString();
+   channel_tokens_.clear();
+   const QJsonObject tokens =
+       object.value(QStringLiteral("channel_tokens")).toObject();
+   const QStringList ids = tokens.keys();
+   for (const QString& id : ids) {
+      channel_tokens_.insert(id, tokens.value(id).toString());
+   }
    return true;
 }
 
@@ -228,6 +297,9 @@ bool CSecretStore::load() {
    }
    if (blob.isEmpty()) {
       api_key_.clear();
+      google_client_id_.clear();
+      google_client_secret_.clear();
+      channel_tokens_.clear();
       emit settings_changed();
       return true;
    }

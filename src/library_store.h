@@ -66,6 +66,7 @@ class CLibraryStore : public QObject {
    Q_PROPERTY(QString rootPath READ root_path NOTIFY open_changed)
    Q_PROPERTY(QString rootBinId READ root_bin_id NOTIFY open_changed)
    Q_PROPERTY(QString lastError READ last_error NOTIFY library_changed)
+   Q_PROPERTY(int channelCount READ channel_count NOTIFY library_changed)
 
  public:
    /**
@@ -651,6 +652,49 @@ class CLibraryStore : public QObject {
    Q_INVOKABLE int bin_count() const;
 
    /**
+    * @brief Число подключённых каналов.
+    * @return строки channels.
+    */
+   Q_INVOKABLE int channel_count() const;
+
+   /**
+    * @brief Id канала по индексу.
+    * @param index - позиция с нуля.
+    * @return channel_id или пусто.
+    */
+   Q_INVOKABLE QString channel_id_at(int index) const;
+
+   /**
+    * @brief Название канала.
+    * @param channel_id - id YouTube.
+    * @return название или пусто.
+    */
+   Q_INVOKABLE QString channel_title(const QString& channel_id) const;
+
+   /**
+    * @brief Название канала по индексу.
+    * @param index - позиция с нуля.
+    * @return название или пусто.
+    */
+   Q_INVOKABLE QString channel_title_at(int index) const;
+
+   /**
+    * @brief Пишет или обновляет канал.
+    * @param channel_id - id YouTube.
+    * @param title - название.
+    * @return true, если запись есть.
+    */
+   Q_INVOKABLE bool upsert_channel(const QString& channel_id,
+                                   const QString& title);
+
+   /**
+    * @brief Удаляет канал из библиотеки.
+    * @param channel_id - id YouTube.
+    * @return true, если строка удалена или её не было.
+    */
+   Q_INVOKABLE bool remove_channel(const QString& channel_id);
+
+   /**
     * @brief Все бины.
     * @return записи bins.
     */
@@ -700,6 +744,7 @@ class CLibraryStore : public QObject {
    bool migrate_from_v2();
    bool migrate_from_v3();
    bool migrate_from_v4();
+   bool migrate_from_v5();
    bool interrupt_running_tasks();
    QString latest_task_field(const QString& short_id,
                              const QString& field) const;

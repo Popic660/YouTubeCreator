@@ -35,6 +35,7 @@ class CHttpTransport : public QObject {
    Q_PROPERTY(int chatCount READ chat_count NOTIFY log_changed)
    Q_PROPERTY(int speechCount READ speech_count NOTIFY log_changed)
    Q_PROPERTY(int klingCount READ kling_count NOTIFY log_changed)
+   Q_PROPERTY(int googleCount READ google_count NOTIFY log_changed)
    Q_PROPERTY(QString lastUrl READ last_url NOTIFY log_changed)
    Q_PROPERTY(QString lastBody READ last_body_text NOTIFY log_changed)
    Q_PROPERTY(QStringList urls READ urls NOTIFY log_changed)
@@ -50,6 +51,7 @@ class CHttpTransport : public QObject {
    int chat_count() const { return chat_count_; }
    int speech_count() const { return speech_count_; }
    int kling_count() const { return kling_count_; }
+   int google_count() const { return google_count_; }
    QString last_url() const { return last_url_; }
    QStringList urls() const { return urls_; }
    QString last_body_text() const {
@@ -99,10 +101,25 @@ class CHttpTransport : public QObject {
     * @param url - адрес.
     * @param bearer - ключ или пусто.
     * @param body - тело.
+    * @param content_type - тип тела или пусто для JSON.
     * @return ответ или ошибка.
     */
    HttpResponse post(const QString& url, const QString& bearer,
-                     const QByteArray& body);
+                     const QByteArray& body,
+                     const QString& content_type = QString());
+
+   /**
+    * @brief POST для QML-тестов.
+    * @param url - адрес.
+    * @param bearer - ключ или пусто.
+    * @param body - тело.
+    * @param content_type - тип или пусто для JSON.
+    * @return status, body, error.
+    */
+   Q_INVOKABLE QVariantMap post(const QString& url,
+                                const QString& bearer,
+                                const QString& body,
+                                const QString& content_type);
 
    /**
     * @brief Выполняет GET.
@@ -136,7 +153,8 @@ class CHttpTransport : public QObject {
  private:
    HttpResponse take_stub();
    HttpResponse live(const QString& method, const QString& url,
-                     const QString& bearer, const QByteArray& body);
+                     const QString& bearer, const QByteArray& body,
+                     const QString& content_type);
    void record(const QString& url, const QByteArray& body);
    static QVariantMap to_map(const HttpResponse& response);
 
@@ -146,6 +164,7 @@ class CHttpTransport : public QObject {
    int chat_count_ = 0;
    int speech_count_ = 0;
    int kling_count_ = 0;
+   int google_count_ = 0;
    QString last_url_;
    QByteArray last_body_;
    QStringList urls_;

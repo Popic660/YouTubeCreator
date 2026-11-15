@@ -70,6 +70,7 @@ void CHttpTransport::clear() {
    chat_count_ = 0;
    speech_count_ = 0;
    kling_count_ = 0;
+   google_count_ = 0;
    last_url_.clear();
    last_body_.clear();
    urls_.clear();
@@ -104,6 +105,10 @@ void CHttpTransport::record(const QString& url,
        url.contains(QLatin1String("/tasks"))) {
       ++kling_count_;
    }
+   if (url.contains(QLatin1String("oauth2.googleapis.com")) ||
+       url.contains(QLatin1String("googleapis.com/youtube"))) {
+      ++google_count_;
+   }
    emit log_changed();
 }
 
@@ -118,12 +123,21 @@ QVariantMap CHttpTransport::to_map(const HttpResponse& response) {
 
 HttpResponse CHttpTransport::post(const QString& url,
                                   const QString& bearer,
-                                  const QByteArray& body) {
+                                  const QByteArray& body,
+                                  const QString& content_type) {
    record(url, body);
    if (stub_) {
       return take_stub();
    }
-   return live(QStringLiteral("POST"), url, bearer, body);
+   return live(QStringLiteral("POST"), url, bearer, body,
+               content_type);
+}
+
+QVariantMap CHttpTransport::post(const QString& url,
+                                 const QString& bearer,
+                                 const QString& body,
+                                 const QString& content_type) {
+   return to_map(post(url, bearer, body.toUtf8(), content_type));
 }
 
 HttpResponse CHttpTransport::get_response(const QString& url,
@@ -132,7 +146,7 @@ HttpResponse CHttpTransport::get_response(const QString& url,
    if (stub_) {
       return take_stub();
    }
-   return live(QStringLiteral("GET"), url, bearer, {});
+   return live(QStringLiteral("GET"), url, bearer, {}, {});
 }
 
 QVariantMap CHttpTransport::get(const QString& url,
@@ -159,13 +173,16 @@ HttpResponse CHttpTransport::take_stub() {
 HttpResponse CHttpTransport::live(const QString& method,
                                   const QString& url,
                                   const QString& bearer,
-                                  const QByteArray& body) {
+                                  const QByteArray& body,
+                                  const QString& content_type) {
    aborted_ = false;
    QNetworkAccessManager manager;
    QNetworkRequest request{QUrl(url)};
    if (method == QLatin1String("POST")) {
-      request.setHeader(QNetworkRequest::ContentTypeHeader,
-                        QStringLiteral("application/json"));
+      const QString type = content_type.trimmed().isEmpty()
+          ? QStringLiteral("application/json")
+          : content_type;
+      request.setHeader(QNetworkRequest::ContentTypeHeader, type);
    }
    if (!bearer.isEmpty()) {
       request.setRawHeader(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QtQml/qqmlregistration.h>
@@ -31,6 +32,17 @@ class CSecretStore : public QObject {
    Q_PROPERTY(QString klingApiKey READ kling_api_key_display
                   WRITE set_kling_api_key NOTIFY settings_changed)
    Q_PROPERTY(bool hasKlingKey READ has_kling_key
+                  NOTIFY settings_changed)
+   Q_PROPERTY(QString googleClientId READ google_client_id
+                  WRITE set_google_client_id
+                  NOTIFY settings_changed)
+   Q_PROPERTY(QString googleClientSecret
+                  READ google_client_secret_display
+                  WRITE set_google_client_secret
+                  NOTIFY settings_changed)
+   Q_PROPERTY(bool hasGoogleClient READ has_google_client
+                  NOTIFY settings_changed)
+   Q_PROPERTY(bool hasGoogleSecret READ has_google_secret
                   NOTIFY settings_changed)
 
  public:
@@ -83,6 +95,38 @@ class CSecretStore : public QObject {
     * @return true, если ключ непустой.
     */
    bool has_kling_key() const { return !kling_api_key_.isEmpty(); }
+
+   QString google_client_id() const { return google_client_id_; }
+
+   /**
+    * @brief Поле секрета Google для UI: после save всегда пустое.
+    * @return пустая строка.
+    */
+   QString google_client_secret_display() const { return {}; }
+
+   /**
+    * @brief Секрет OAuth-клиента Google.
+    * @return секрет или пусто.
+    */
+   QString secret_google_client_secret() const {
+      return google_client_secret_;
+   }
+
+   /**
+    * @brief Сообщает, что client id Google задан.
+    * @return true, если id непустой.
+    */
+   bool has_google_client() const {
+      return !google_client_id_.isEmpty();
+   }
+
+   /**
+    * @brief Сообщает, что секрет клиента Google задан.
+    * @return true, если секрет непустой.
+    */
+   bool has_google_secret() const {
+      return !google_client_secret_.isEmpty();
+   }
 
    /**
     * @brief Задаёт адрес OpenAI-совместимого API.
@@ -139,6 +183,47 @@ class CSecretStore : public QObject {
    void set_kling_api_key(const QString& key);
 
    /**
+    * @brief Задаёт client id Google OAuth.
+    * @param id - идентификатор клиента.
+    */
+   void set_google_client_id(const QString& id);
+
+   /**
+    * @brief Задаёт секрет клиента Google до save.
+    * @param secret - секрет.
+    */
+   void set_google_client_secret(const QString& secret);
+
+   /**
+    * @brief Пишет refresh-токен канала.
+    * @param channel_id - id канала YouTube.
+    * @param token - refresh-токен.
+    */
+   Q_INVOKABLE void set_channel_refresh(const QString& channel_id,
+                                        const QString& token);
+
+   /**
+    * @brief Удаляет refresh-токен канала.
+    * @param channel_id - id канала YouTube.
+    */
+   Q_INVOKABLE void clear_channel_refresh(const QString& channel_id);
+
+   /**
+    * @brief Refresh-токен канала.
+    * @param channel_id - id канала YouTube.
+    * @return токен или пусто.
+    */
+   Q_INVOKABLE QString channel_refresh(const QString& channel_id) const;
+
+   /**
+    * @brief Сообщает, что refresh-токен канала задан.
+    * @param channel_id - id канала YouTube.
+    * @return true, если токен непустой.
+    */
+   Q_INVOKABLE bool has_channel_refresh(
+       const QString& channel_id) const;
+
+   /**
     * @brief Включает память вместо DPAPI для тестов.
     * @param enabled - true для памяти.
     */
@@ -184,5 +269,8 @@ class CSecretStore : public QObject {
    QString kling_model_ = QStringLiteral("kling-4.0-flash");
    QString kling_image_model_ = QStringLiteral("kling-v3");
    QString kling_api_key_;
+   QString google_client_id_;
+   QString google_client_secret_;
+   QHash<QString, QString> channel_tokens_;
    bool memory_ = false;
 };

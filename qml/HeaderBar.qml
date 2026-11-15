@@ -7,8 +7,42 @@ Rectangle {
    objectName: "headerBar"
    property alias query: searchText.text
    property bool exportEnabled: false
+   property var channelAuth: null
+   property int channelCount: 0
    signal exportRequested()
    signal settingsRequested()
+   signal connectChannelRequested()
+   signal disconnectChannelRequested(string channelId)
+
+   function channelIdAt(index) {
+      if (!channelAuth) {
+         return ""
+      }
+      return channelAuth.channel_id_at(index)
+   }
+
+   function channelTitleAt(index) {
+      if (!channelAuth) {
+         return ""
+      }
+      return channelAuth.channel_title_at(index)
+   }
+
+   component ChannelMenuItem: MenuItem {
+      id: item
+      implicitHeight: 44
+      background: Rectangle {
+         radius: 8
+         color: item.highlighted ? Theme.tonal : "transparent"
+      }
+      contentItem: Text {
+         text: item.text
+         color: Theme.text
+         font.pixelSize: 16
+         leftPadding: 16
+         verticalAlignment: Text.AlignVCenter
+      }
+   }
    implicitHeight: Theme.headerHeight
    height: Theme.headerHeight
    color: Theme.canvas
@@ -187,15 +221,60 @@ Rectangle {
             glyphName: "channelMenu"
             strokeColor: Theme.text
          }
-         onClicked: {}
+         onClicked: channelMenu.popup()
          HoverHandler {
             id: channelHover
          }
          HintTip {
+            objectName: "channelHint"
             visible: channelHover.hovered
-            text: "Каналы YouTube. Пока заглушка: подключение канала " +
-               "появится на следующих этапах. Сейчас публикация не " +
-               "запускается."
+            text: "Каналы YouTube. Подключите канал через вход Google. " +
+               "Нужен client id в настройках. Публикация на этом " +
+               "этапе не запускается."
+         }
+         Menu {
+            id: channelMenu
+            objectName: "channelMenu"
+            padding: 8
+            background: Rectangle {
+               objectName: "channelMenuSurface"
+               color: Theme.menu
+               radius: 12
+               implicitWidth: 280
+               implicitHeight: 80
+            }
+            ChannelMenuItem {
+               objectName: "connectChannelItem"
+               text: "Подключить канал"
+               onTriggered: header.connectChannelRequested()
+            }
+            Instantiator {
+               model: header.channelCount
+               delegate: QtObject {
+                  required property int index
+                  property string cid: header.channelIdAt(index)
+                  property string ctitle: header.channelTitleAt(index)
+                  property ChannelMenuItem titleItem: ChannelMenuItem {
+                     objectName: "channelItem-" + cid
+                     text: ctitle
+                  }
+                  property ChannelMenuItem offItem: ChannelMenuItem {
+                     objectName: "disconnectChannel-" + cid
+                     text: "Отключить · " + ctitle
+                     onTriggered:
+                        header.disconnectChannelRequested(cid)
+                  }
+               }
+               onObjectAdded: function(index, object) {
+                  channelMenu.insertItem(index * 2 + 1,
+                     object.titleItem)
+                  channelMenu.insertItem(index * 2 + 2, object.offItem)
+               }
+               onObjectRemoved: function(index, object) {
+                  channelMenu.removeItem(object.titleItem)
+                  channelMenu.removeItem(object.offItem)
+               }
+            }
          }
       }
    }
