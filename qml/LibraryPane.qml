@@ -22,6 +22,8 @@ Rectangle {
    property string panelId: "library"
    signal panelDragStarted()
    signal panelDragFinished()
+   signal entryClicked(string entryId, string kind)
+   signal statsRequested(string shortId)
 
    implicitWidth: Theme.libraryWidth
    color: Theme.canvas
@@ -550,6 +552,7 @@ Rectangle {
                drag.threshold: 12
                onClicked: function(mouse) {
                   pane.select_entry(row.entryId, row.kind)
+                  pane.entryClicked(row.entryId, row.kind)
                   if (mouse.button === Qt.RightButton) {
                      if (row.kind === "short") {
                         pane.open_short_menu(row.entryId)
@@ -634,6 +637,16 @@ Rectangle {
          objectName: "menuTopicVoice"
          text: "Тема и голос"
          onTriggered: pane.open_topic_dialog()
+      }
+      LibraryMenuItem {
+         objectName: "menuStats"
+         text: "Статистика"
+         onTriggered: {
+            if (pane.store !== null &&
+                pane.store.short_has_video(pane.confirmShortId)) {
+               pane.statsRequested(pane.confirmShortId)
+            }
+         }
       }
       LibraryMenuItem {
          objectName: "menuDeleteShort"

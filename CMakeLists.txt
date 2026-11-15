@@ -160,6 +160,10 @@ qt_add_qml_module(creator_qml
     src/cover_tool.cpp
     src/channel_auth.h
     src/channel_auth.cpp
+    src/publisher.h
+    src/publisher.cpp
+    src/stats_sync.h
+    src/stats_sync.cpp
   QML_FILES
     qml/Main.qml
     qml/Theme.qml
@@ -174,6 +178,7 @@ qt_add_qml_module(creator_qml
     qml/PanelChrome.qml
     qml/CapsuleButton.qml
     qml/HintTip.qml
+    qml/AnalyticsView.qml
 )
 target_include_directories(creator_qml PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src"

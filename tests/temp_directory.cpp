@@ -305,6 +305,70 @@ bool CTempDirectory::seed_schema_v5(const QString& directory) {
    return ok;
 }
 
+bool CTempDirectory::seed_schema_v6(const QString& directory) {
+   if (!QDir().mkpath(directory)) {
+      return false;
+   }
+   const QString name =
+       QUuid::createUuid().toString(QUuid::WithoutBraces);
+   QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE", name);
+   database.setDatabaseName(QDir(directory).filePath("library.db"));
+   if (!database.open()) {
+      QSqlDatabase::removeDatabase(name);
+      return false;
+   }
+   QSqlQuery query(database);
+   const bool ok =
+       query.exec("CREATE TABLE folders ("
+                  "id TEXT PRIMARY KEY, parent_id TEXT, "
+                  "name TEXT NOT NULL, prompt TEXT NOT NULL "
+                  "DEFAULT '')") &&
+       query.exec("CREATE TABLE shorts ("
+                  "id TEXT PRIMARY KEY, folder_id TEXT NOT NULL, "
+                  "name TEXT NOT NULL, status TEXT NOT NULL, "
+                  "duration_ms INTEGER NOT NULL DEFAULT 0, "
+                  "poster_relpath TEXT NOT NULL DEFAULT '', "
+                  "topic TEXT NOT NULL DEFAULT '', "
+                  "script TEXT NOT NULL DEFAULT '', "
+                  "cover_relpath TEXT NOT NULL DEFAULT '')") &&
+       query.exec("CREATE TABLE bins ("
+                  "id TEXT PRIMARY KEY, parent_id TEXT, "
+                  "name TEXT NOT NULL)") &&
+       query.exec("CREATE TABLE assets ("
+                  "id TEXT PRIMARY KEY, bin_id TEXT NOT NULL, "
+                  "name TEXT NOT NULL, kind TEXT NOT NULL, "
+                  "relpath TEXT NOT NULL, "
+                  "duration_ms INTEGER NOT NULL DEFAULT 0, "
+                  "in_ms INTEGER NOT NULL DEFAULT 0, "
+                  "out_ms INTEGER NOT NULL DEFAULT 0, "
+                  "fingerprint TEXT NOT NULL DEFAULT '', "
+                  "size INTEGER NOT NULL DEFAULT 0)") &&
+       query.exec("CREATE TABLE tasks ("
+                  "id TEXT PRIMARY KEY, short_id TEXT NOT NULL, "
+                  "step TEXT NOT NULL, status TEXT NOT NULL, "
+                  "progress INTEGER NOT NULL DEFAULT 0, "
+                  "error TEXT NOT NULL DEFAULT '', "
+                  "created_ms INTEGER NOT NULL DEFAULT 0)") &&
+       query.exec("CREATE TABLE channels ("
+                  "channel_id TEXT PRIMARY KEY, "
+                  "title TEXT NOT NULL)") &&
+       query.exec("INSERT INTO folders(id, parent_id, name, prompt) "
+                  "VALUES('f1', '', 'Old', 'Style')") &&
+       query.exec("INSERT INTO shorts(id, folder_id, name, status, "
+                  "duration_ms, poster_relpath, topic, script, "
+                  "cover_relpath) "
+                  "VALUES('s1', 'f1', 'Clip', 'draft', 0, '', "
+                  "'Old topic', 'Old script', '')") &&
+       query.exec("INSERT INTO bins(id, parent_id, name) "
+                  "VALUES('root', NULL, 'Медиа')") &&
+       query.exec("INSERT INTO channels(channel_id, title) "
+                  "VALUES('UC1', 'Old Channel')") &&
+       query.exec("PRAGMA user_version = 6");
+   database.close();
+   QSqlDatabase::removeDatabase(name);
+   return ok;
+}
+
 QString CTempDirectory::make_image(const QString& directory) const {
    if (!QDir().mkpath(directory)) {
       return {};

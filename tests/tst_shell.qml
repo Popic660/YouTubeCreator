@@ -266,4 +266,36 @@ TestCase {
       verify(channel.glyphSignature.length > 8)
       verify(seen.indexOf(channel.glyphSignature) === -1)
    }
+
+   function test_publishButtonFilledExportTonal() {
+      const shell = createShell()
+      const publish = requireChild(shell, "publishButton")
+      const exportButton = requireChild(shell, "exportButton")
+      compare(publish.filled, true)
+      compare(exportButton.filled, false)
+      compare(publish.enabled, false)
+      compare(publish.height, 40)
+      verify(requireChild(shell, "channelHint").text.indexOf(
+         "публикация не запускается") < 0)
+   }
+
+   function test_analyticsViewHidesTimeline() {
+      const shell = createShell()
+      shell.open_channel_stats("UC1")
+      compare(shell.centerMode, "analytics")
+      const analytics = requireChild(shell, "analyticsView")
+      verify(analytics.visible)
+      compare(requireChild(shell, "plotSurface").color, "#3f3f3f")
+      compare(requireChild(shell, "timelineHost").visible, false)
+      verify(requireChild(shell, "libraryList") !== null)
+      tryVerify(function() {
+         return findChild(shell, "chip7") !== null
+      })
+      requireChild(shell, "chip7")
+      requireChild(shell, "chip28")
+      requireChild(shell, "chip90")
+      verify(requireChild(shell, "analyticsDelay").text.indexOf(
+         "двух суток") >= 0)
+      requireChild(shell, "analyticsRefresh")
+   }
 }

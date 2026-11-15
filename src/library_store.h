@@ -695,6 +695,141 @@ class CLibraryStore : public QObject {
    Q_INVOKABLE bool remove_channel(const QString& channel_id);
 
    /**
+    * @brief Число публикаций.
+    * @param short_id - ролик или пусто для всех.
+    * @return строки publications.
+    */
+   Q_INVOKABLE int publication_count(
+       const QString& short_id = QString()) const;
+
+   /**
+    * @brief Id публикации по индексу.
+    * @param short_id - ролик или пусто.
+    * @param index - позиция с нуля.
+    * @return id или пусто.
+    */
+   Q_INVOKABLE QString publication_id_at(
+       const QString& short_id, int index) const;
+
+   /**
+    * @brief Id видео публикации.
+    * @param id - публикация.
+    * @return video_id или пусто.
+    */
+   Q_INVOKABLE QString publication_video_id(const QString& id) const;
+
+   /**
+    * @brief Канал публикации.
+    * @param id - публикация.
+    * @return channel_id или пусто.
+    */
+   Q_INVOKABLE QString publication_channel_id(
+       const QString& id) const;
+
+   /**
+    * @brief Статус публикации.
+    * @param id - публикация.
+    * @return status или пусто.
+    */
+   Q_INVOKABLE QString publication_status(const QString& id) const;
+
+   /**
+    * @brief Статус обложки публикации.
+    * @param id - публикация.
+    * @return cover_status или пусто.
+    */
+   Q_INVOKABLE QString publication_cover_status(
+       const QString& id) const;
+
+   /**
+    * @brief Приватность публикации.
+    * @param id - публикация.
+    * @return privacy или пусто.
+    */
+   Q_INVOKABLE QString publication_privacy(const QString& id) const;
+
+   /**
+    * @brief Ошибка публикации.
+    * @param id - публикация.
+    * @return текст или пусто.
+    */
+   Q_INVOKABLE QString publication_error(const QString& id) const;
+
+   /**
+    * @brief Есть ли у ролика id видео.
+    * @param short_id - ролик.
+    * @return true, если есть непустой video_id.
+    */
+   Q_INVOKABLE bool short_has_video(const QString& short_id) const;
+
+   /**
+    * @brief Пишет или обновляет публикацию пары ролик+канал.
+    * @param short_id - ролик.
+    * @param channel_id - канал.
+    * @param video_id - id YouTube.
+    * @param privacy - private, unlisted или public.
+    * @param status - статус выгрузки.
+    * @param cover_status - set, skipped, failed или пусто.
+    * @param error - текст ошибки.
+    * @return true, если строка есть.
+    */
+   Q_INVOKABLE bool upsert_publication(const QString& short_id,
+                                       const QString& channel_id,
+                                       const QString& video_id,
+                                       const QString& privacy,
+                                       const QString& status,
+                                       const QString& cover_status,
+                                       const QString& error);
+
+   /**
+    * @brief Пишет снимок статистики.
+    * @param kind - channel или video.
+    * @param target_id - channel_id или video_id.
+    * @param payload - JSON счётчиков.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool upsert_stats(const QString& kind,
+                                 const QString& target_id,
+                                 const QString& payload);
+
+   /**
+    * @brief JSON снимка статистики.
+    * @param kind - channel или video.
+    * @param target_id - id.
+    * @return payload или пусто.
+    */
+   Q_INVOKABLE QString stats_payload(const QString& kind,
+                                     const QString& target_id) const;
+
+   /**
+    * @brief Время синхронизации снимка.
+    * @param kind - channel или video.
+    * @param target_id - id.
+    * @return миллисекунды или 0.
+    */
+   Q_INVOKABLE qint64 stats_synced_ms(const QString& kind,
+                                      const QString& target_id) const;
+
+   /**
+    * @brief Остаток выгрузок videos.insert на сегодня PT.
+    * @return 0..100.
+    */
+   Q_INVOKABLE int quota_remaining() const;
+
+   /**
+    * @brief Увеличивает счётчик insert за сегодня PT.
+    * @return true, если записано.
+    */
+   Q_INVOKABLE bool increment_quota();
+
+   /**
+    * @brief Абсолютный путь экспорта ролика.
+    * @param short_id - ролик.
+    * @return путь exports/<id>.mp4 или пусто.
+    */
+   Q_INVOKABLE QString export_path(const QString& short_id) const;
+
+   /**
     * @brief Все бины.
     * @return записи bins.
     */
@@ -745,6 +880,11 @@ class CLibraryStore : public QObject {
    bool migrate_from_v3();
    bool migrate_from_v4();
    bool migrate_from_v5();
+   bool migrate_from_v6();
+   bool ensure_publish_tables();
+   QString publication_field(const QString& id,
+                             const QString& column) const;
+   QString quota_day_pt() const;
    bool interrupt_running_tasks();
    QString latest_task_field(const QString& short_id,
                              const QString& field) const;

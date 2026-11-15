@@ -38,10 +38,25 @@ void CHttpTransport::use_stub() {
    stub_ = true;
 }
 
+void CHttpTransport::apply_pending_headers(HttpResponse* response) {
+   if (response == nullptr) {
+      return;
+   }
+   if (!pending_location_.isEmpty()) {
+      response->location = pending_location_;
+      pending_location_.clear();
+   }
+   if (pending_status_ > 0) {
+      response->status = pending_status_;
+      pending_status_ = 0;
+   }
+}
+
 void CHttpTransport::enqueue_json(const QString& json) {
    HttpResponse response;
    response.status = 200;
    response.body = json.toUtf8();
+   apply_pending_headers(&response);
    queue_.push_back(response);
 }
 
@@ -50,18 +65,33 @@ void CHttpTransport::enqueue_file(const QString& path) {
    HttpResponse response;
    if (!file.open(QIODevice::ReadOnly)) {
       response.error = QStringLiteral("stub file missing");
+      apply_pending_headers(&response);
       queue_.push_back(response);
       return;
    }
    response.status = 200;
    response.body = file.readAll();
+   apply_pending_headers(&response);
    queue_.push_back(response);
 }
 
 void CHttpTransport::enqueue_error(const QString& error) {
    HttpResponse response;
    response.error = error;
+   apply_pending_headers(&response);
    queue_.push_back(response);
+}
+
+void CHttpTransport::enqueue_header(const QString& name,
+                                    const QString& value) {
+   if (name.compare(QStringLiteral("Location"),
+                    Qt::CaseInsensitive) == 0) {
+      pending_location_ = value;
+   }
+}
+
+void CHttpTransport::enqueue_status(int status) {
+   pending_status_ = status;
 }
 
 void CHttpTransport::clear() {
@@ -72,8 +102,11 @@ void CHttpTransport::clear() {
    kling_count_ = 0;
    google_count_ = 0;
    last_url_.clear();
+   last_location_.clear();
    last_body_.clear();
    urls_.clear();
+   pending_location_.clear();
+   pending_status_ = 0;
    aborted_ = false;
    emit log_changed();
 }
@@ -105,8 +138,11 @@ void CHttpTransport::record(const QString& url,
        url.contains(QLatin1String("/tasks"))) {
       ++kling_count_;
    }
-   if (url.contains(QLatin1String("oauth2.googleapis.com")) ||
-       url.contains(QLatin1String("googleapis.com/youtube"))) {
+   const bool google_host =
+       url.contains(QLatin1String("oauth2.googleapis.com")) ||
+       (url.contains(QLatin1String("googleapis.com")) &&
+        url.contains(QLatin1String("youtube")));
+   if (google_host) {
       ++google_count_;
    }
    emit log_changed();
@@ -118,19 +154,25 @@ QVariantMap CHttpTransport::to_map(const HttpResponse& response) {
    map.insert(QStringLiteral("body"),
               QString::fromUtf8(response.body));
    map.insert(QStringLiteral("error"), response.error);
+   map.insert(QStringLiteral("location"), response.location);
    return map;
 }
 
 HttpResponse CHttpTransport::post(const QString& url,
                                   const QString& bearer,
                                   const QByteArray& body,
-                                  const QString& content_type) {
+                                  const QString& content_type,
+                                  const QVariantMap& headers) {
    record(url, body);
+   HttpResponse response;
    if (stub_) {
-      return take_stub();
+      response = take_stub();
+   } else {
+      response = live(QStringLiteral("POST"), url, bearer, body,
+                      content_type, headers);
    }
-   return live(QStringLiteral("POST"), url, bearer, body,
-               content_type);
+   last_location_ = response.location;
+   return response;
 }
 
 QVariantMap CHttpTransport::post(const QString& url,
@@ -140,13 +182,41 @@ QVariantMap CHttpTransport::post(const QString& url,
    return to_map(post(url, bearer, body.toUtf8(), content_type));
 }
 
+HttpResponse CHttpTransport::put(const QString& url,
+                                 const QString& bearer,
+                                 const QByteArray& body,
+                                 const QString& content_type,
+                                 const QVariantMap& headers) {
+   record(url, body);
+   HttpResponse response;
+   if (stub_) {
+      response = take_stub();
+   } else {
+      response = live(QStringLiteral("PUT"), url, bearer, body,
+                      content_type, headers);
+   }
+   last_location_ = response.location;
+   return response;
+}
+
+QVariantMap CHttpTransport::put(const QString& url,
+                                const QString& bearer,
+                                const QString& body,
+                                const QString& content_type) {
+   return to_map(put(url, bearer, body.toUtf8(), content_type));
+}
+
 HttpResponse CHttpTransport::get_response(const QString& url,
                                           const QString& bearer) {
    record(url, {});
+   HttpResponse response;
    if (stub_) {
-      return take_stub();
+      response = take_stub();
+   } else {
+      response = live(QStringLiteral("GET"), url, bearer, {}, {}, {});
    }
-   return live(QStringLiteral("GET"), url, bearer, {}, {});
+   last_location_ = response.location;
+   return response;
 }
 
 QVariantMap CHttpTransport::get(const QString& url,
@@ -174,11 +244,12 @@ HttpResponse CHttpTransport::live(const QString& method,
                                   const QString& url,
                                   const QString& bearer,
                                   const QByteArray& body,
-                                  const QString& content_type) {
+                                  const QString& content_type,
+                                  const QVariantMap& headers) {
    aborted_ = false;
    QNetworkAccessManager manager;
    QNetworkRequest request{QUrl(url)};
-   if (method == QLatin1String("POST")) {
+   if (method != QLatin1String("GET")) {
       const QString type = content_type.trimmed().isEmpty()
           ? QStringLiteral("application/json")
           : content_type;
@@ -189,9 +260,16 @@ HttpResponse CHttpTransport::live(const QString& method,
           "Authorization",
           QByteArray("Bearer ") + bearer.toUtf8());
    }
+   for (auto it = headers.constBegin(); it != headers.constEnd();
+        ++it) {
+      request.setRawHeader(it.key().toUtf8(),
+                           it.value().toString().toUtf8());
+   }
    QNetworkReply* reply = nullptr;
    if (method == QLatin1String("GET")) {
       reply = manager.get(request);
+   } else if (method == QLatin1String("PUT")) {
+      reply = manager.put(request, body);
    } else {
       reply = manager.post(request, body);
    }
@@ -212,6 +290,8 @@ HttpResponse CHttpTransport::live(const QString& method,
        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
            .toInt();
    response.body = reply->readAll();
+   response.location =
+       QString::fromUtf8(reply->rawHeader("Location"));
    if (reply->error() != QNetworkReply::NoError &&
        response.body.isEmpty()) {
       response.error = reply->errorString();
