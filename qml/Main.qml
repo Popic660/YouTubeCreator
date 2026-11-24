@@ -54,6 +54,18 @@ ApplicationWindow {
       dropTarget = ""
    }
 
+   function accept_panel_drop(drop, dock) {
+      if (!drop || !drop.source) {
+         return
+      }
+      const id = drop.source.panelId ? drop.source.panelId : ""
+      if (id.length === 0) {
+         return
+      }
+      place_panel(id, dock)
+      drop.acceptProposedAction()
+   }
+
    function panels_in(dock) {
       const ids = []
       if (mediaDock === dock) {
@@ -489,11 +501,12 @@ ApplicationWindow {
          + (shell.timelineDock === dockName ? 1 : 0)
       readonly property bool occupied: panelCount > 0
       readonly property bool highlighted: shell.dropTarget === dockName
+         || dropArea.containsDrag
       objectName: dockName === "left" ? "dockLeft"
          : dockName === "right" ? "dockRight" : "dockBottom"
       color: Theme.canvas
-      border.color: highlighted ? Theme.link : "transparent"
-      border.width: highlighted ? 2 : 0
+      border.color: highlighted ? Theme.link : Theme.outline
+      border.width: highlighted ? 2 : (shell.panelDragging ? 1 : 0)
 
       Row {
          id: tabRow
@@ -526,16 +539,27 @@ ApplicationWindow {
       }
 
       DropArea {
+         id: dropArea
+         objectName: "dockDrop-" + dock.dockName
          anchors.fill: parent
          enabled: shell.panelDragging
          z: 4
          keys: ["panel"]
          onEntered: shell.show_drop_target(dock.dockName)
-         onExited: shell.clear_drop_target()
-         onDropped: function(drop) {
-            if (drop.source && drop.source.panelId) {
-               shell.place_panel(drop.source.panelId, dock.dockName)
+         onExited: {
+            if (shell.dropTarget === dock.dockName) {
+               shell.clear_drop_target()
             }
+         }
+         onDropped: function(drop) {
+            shell.accept_panel_drop(drop, dock.dockName)
+         }
+
+         Rectangle {
+            anchors.fill: parent
+            visible: shell.panelDragging
+            color: Theme.link
+            opacity: dropArea.containsDrag ? 0.35 : 0.12
          }
       }
    }
@@ -584,14 +608,15 @@ ApplicationWindow {
          id: leftDock
          dockName: "left"
          visible: leftDock.occupied || leftDock.highlighted
+            || shell.panelDragging
          Layout.preferredWidth: leftDock.visible
-            ? (leftDock.occupied ? shell.leftDockWidth : 48) : 0
+            ? shell.leftDockWidth : 0
          Layout.fillHeight: true
       }
       DockSplitter {
          objectName: "splitterLeft"
          dockName: "left"
-         visible: leftDock.occupied
+         visible: leftDock.visible
          Layout.preferredWidth: visible ? 4 : 0
          Layout.fillHeight: true
       }
@@ -712,7 +737,7 @@ ApplicationWindow {
             objectName: "splitterBottom"
             axis: "height"
             dockName: "bottom"
-            visible: bottomDock.occupied
+            visible: bottomDock.visible
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 4 : 0
          }
@@ -720,16 +745,17 @@ ApplicationWindow {
             id: bottomDock
             dockName: "bottom"
             visible: bottomDock.occupied || bottomDock.highlighted
+               || shell.panelDragging
             Layout.fillWidth: true
             Layout.preferredHeight: bottomDock.visible
-               ? (bottomDock.occupied ? shell.bottomDockHeight : 32) : 0
+               ? shell.bottomDockHeight : 0
          }
       }
 
       DockSplitter {
          objectName: "splitterRight"
          dockName: "right"
-         visible: rightDock.occupied
+         visible: rightDock.visible
          Layout.preferredWidth: visible ? 4 : 0
          Layout.fillHeight: true
       }
@@ -737,8 +763,9 @@ ApplicationWindow {
          id: rightDock
          dockName: "right"
          visible: rightDock.occupied || rightDock.highlighted
+            || shell.panelDragging
          Layout.preferredWidth: rightDock.visible
-            ? (rightDock.occupied ? shell.rightDockWidth : 48) : 0
+            ? shell.rightDockWidth : 0
          Layout.fillHeight: true
       }
    }
@@ -790,70 +817,6 @@ ApplicationWindow {
       document: projectDocument
       onPanelDragStarted: shell.start_panel_drag()
       onPanelDragFinished: shell.end_panel_drag()
-   }
-
-   Item {
-      anchors.fill: parent
-      visible: shell.panelDragging
-      z: 30
-
-      DropArea {
-         width: 72
-         anchors.left: parent.left
-         anchors.top: parent.top
-         anchors.bottom: parent.bottom
-         keys: ["panel"]
-         onEntered: shell.show_drop_target("left")
-         onExited: shell.clear_drop_target()
-         onDropped: function(drop) {
-            if (drop.source && drop.source.panelId) {
-               shell.place_panel(drop.source.panelId, "left")
-            }
-         }
-         Rectangle {
-            anchors.fill: parent
-            color: Theme.link
-            opacity: shell.dropTarget === "left" ? 0.35 : 0.12
-         }
-      }
-      DropArea {
-         width: 72
-         anchors.right: parent.right
-         anchors.top: parent.top
-         anchors.bottom: parent.bottom
-         keys: ["panel"]
-         onEntered: shell.show_drop_target("right")
-         onExited: shell.clear_drop_target()
-         onDropped: function(drop) {
-            if (drop.source && drop.source.panelId) {
-               shell.place_panel(drop.source.panelId, "right")
-            }
-         }
-         Rectangle {
-            anchors.fill: parent
-            color: Theme.link
-            opacity: shell.dropTarget === "right" ? 0.35 : 0.12
-         }
-      }
-      DropArea {
-         height: 72
-         anchors.left: parent.left
-         anchors.right: parent.right
-         anchors.bottom: parent.bottom
-         keys: ["panel"]
-         onEntered: shell.show_drop_target("bottom")
-         onExited: shell.clear_drop_target()
-         onDropped: function(drop) {
-            if (drop.source && drop.source.panelId) {
-               shell.place_panel(drop.source.panelId, "bottom")
-            }
-         }
-         Rectangle {
-            anchors.fill: parent
-            color: Theme.link
-            opacity: shell.dropTarget === "bottom" ? 0.35 : 0.12
-         }
-      }
    }
 
    Dialog {
@@ -1205,7 +1168,16 @@ ApplicationWindow {
          shell.center_settings_dialog()
       }
       contentItem: ColumnLayout {
-         spacing: 12
+         spacing: 8
+         component FieldLabel: Text {
+            Layout.fillWidth: true
+            color: Theme.textSecondary
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+         }
+         FieldLabel {
+            text: "Адрес API"
+         }
          TextField {
             id: settingsBaseField
             objectName: "settingsBaseField"
@@ -1213,7 +1185,7 @@ ApplicationWindow {
             implicitHeight: 40
             font.pixelSize: 14
             color: Theme.text
-            placeholderText: "Адрес API"
+            placeholderText: "https://api.groq.com/openai/v1"
             placeholderTextColor: Theme.textDisabled
             background: Rectangle {
                radius: 4
@@ -1223,6 +1195,9 @@ ApplicationWindow {
                   ? Theme.link : Theme.outline
             }
          }
+         FieldLabel {
+            text: "Модель чата (id, не название сервиса)"
+         }
          TextField {
             id: settingsChatField
             objectName: "settingsChatField"
@@ -1230,7 +1205,7 @@ ApplicationWindow {
             implicitHeight: 40
             font.pixelSize: 14
             color: Theme.text
-            placeholderText: "Модель чата"
+            placeholderText: "llama-3.3-70b-versatile"
             placeholderTextColor: Theme.textDisabled
             background: Rectangle {
                radius: 4
@@ -1239,6 +1214,9 @@ ApplicationWindow {
                border.color: settingsChatField.activeFocus
                   ? Theme.link : Theme.outline
             }
+         }
+         FieldLabel {
+            text: "Модель голоса"
          }
          TextField {
             id: settingsTtsField
@@ -1257,6 +1235,9 @@ ApplicationWindow {
                   ? Theme.link : Theme.outline
             }
          }
+         FieldLabel {
+            text: "Голос"
+         }
          TextField {
             id: settingsVoiceField
             objectName: "settingsVoiceField"
@@ -1274,6 +1255,9 @@ ApplicationWindow {
                   ? Theme.link : Theme.outline
             }
          }
+         FieldLabel {
+            text: "Ключ API"
+         }
          TextField {
             id: settingsKeyField
             objectName: "settingsKeyField"
@@ -1283,7 +1267,7 @@ ApplicationWindow {
             color: Theme.text
             echoMode: TextInput.Password
             placeholderText: secretStore.hasKey
-               ? "Ключ задан"
+               ? "Вставьте новый ключ, чтобы заменить"
                : "Ключ API"
             placeholderTextColor: Theme.textDisabled
             background: Rectangle {
@@ -1293,6 +1277,55 @@ ApplicationWindow {
                border.color: settingsKeyField.activeFocus
                   ? Theme.link : Theme.outline
             }
+         }
+         Text {
+            objectName: "settingsKeyHint"
+            Layout.fillWidth: true
+            color: {
+               if (secretStore.hasGroqKey &&
+                     settingsBaseField.text.indexOf(
+                        "api.openai.com") >= 0) {
+                  return Theme.error
+               }
+               return Theme.textSecondary
+            }
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            text: {
+               if (!secretStore.hasKey) {
+                  return "Ключ Groq начинается с gsk_, ключ " +
+                     "OpenAI — с sk-."
+               }
+               let line = "Сохранён " + secretStore.apiKeyHint +
+                  ". Пустое поле оставляет этот ключ."
+               if (secretStore.hasGroqKey &&
+                     settingsBaseField.text.indexOf(
+                        "api.openai.com") >= 0) {
+                  return line + " Ключ Groq нельзя слать на " +
+                     "OpenAI. Сохраните адрес Groq, затем Повтор."
+               }
+               if (settingsBaseField.text.trim() !==
+                     secretStore.baseUrl) {
+                  return line + " Адрес в поле ещё не сохранён."
+               }
+               return line
+            }
+         }
+         Text {
+            objectName: "settingsChatUrlHint"
+            Layout.fillWidth: true
+            color: Theme.textSecondary
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            text: {
+               secretStore.baseUrl
+               secretStore.hasGroqKey
+               return "Сохранённый запрос чата: " +
+                  secretStore.openai_url("chat/completions")
+            }
+         }
+         FieldLabel {
+            text: "Адрес Kling"
          }
          TextField {
             id: settingsKlingBaseField

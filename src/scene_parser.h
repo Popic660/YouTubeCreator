@@ -12,6 +12,7 @@
  */
 struct Scene {
    QString prompt;
+   QString line;
    int duration_s = 5;
 };
 

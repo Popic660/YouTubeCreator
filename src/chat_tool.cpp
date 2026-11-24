@@ -27,19 +27,18 @@ QString CChatTool::run(const QString& topic, const QString& prompt,
        QStringLiteral("Тема: ") + topic +
            QStringLiteral(
                "\nНапиши сценарий вертикального шортса JSON "
-               "{\"scenes\":[{\"prompt\":\"...\",\"duration_s\":5}]}"));
+               "{\"scenes\":[{\"prompt\":\"кадр\","
+               "\"line\":\"реплика до 120 знаков\","
+               "\"duration_s\":5}]}. prompt — картинка, "
+               "line — голос за кадром."));
    QJsonArray messages;
    messages.append(system_message);
    messages.append(user_message);
    QJsonObject payload;
    payload.insert(QStringLiteral("model"), secrets_->chat_model());
    payload.insert(QStringLiteral("messages"), messages);
-   QString root = secrets_->base_url().trimmed();
-   while (root.endsWith(QLatin1Char('/'))) {
-      root.chop(1);
-   }
    const QString url =
-       root + QStringLiteral("/v1/chat/completions");
+       secrets_->openai_url(QStringLiteral("chat/completions"));
    const HttpResponse response = transport_->post(
        url, secrets_->secret_api_key(),
        QJsonDocument(payload).toJson(QJsonDocument::Compact));

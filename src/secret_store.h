@@ -21,7 +21,11 @@ class CSecretStore : public QObject {
                   NOTIFY settings_changed)
    Q_PROPERTY(QString apiKey READ api_key_display WRITE set_api_key
                   NOTIFY settings_changed)
+   Q_PROPERTY(QString apiKeyHint READ api_key_hint
+                  NOTIFY settings_changed)
    Q_PROPERTY(bool hasKey READ has_key NOTIFY settings_changed)
+   Q_PROPERTY(bool hasGroqKey READ has_groq_key
+                  NOTIFY settings_changed)
    Q_PROPERTY(QString klingBaseUrl READ kling_base_url
                   WRITE set_kling_base_url NOTIFY settings_changed)
    Q_PROPERTY(QString klingModel READ kling_model
@@ -73,10 +77,29 @@ class CSecretStore : public QObject {
    QString secret_api_key() const { return api_key_; }
 
    /**
+    * @brief Собирает OpenAI-совместимый URL без второго /v1.
+    * @param suffix - хвост вроде chat/completions.
+    * @return полный URL.
+    */
+   Q_INVOKABLE QString openai_url(const QString& suffix) const;
+
+   /**
     * @brief Сообщает, что ключ задан.
     * @return true, если ключ непустой.
     */
    bool has_key() const { return !api_key_.isEmpty(); }
+
+   /**
+    * @brief Маска сохранённого ключа для диалога настроек.
+    * @return префикс и хвост или пусто.
+    */
+   QString api_key_hint() const;
+
+   /**
+    * @brief Сообщает, что сохранён ключ Groq.
+    * @return true, если ключ начинается с gsk_.
+    */
+   bool has_groq_key() const;
 
    /**
     * @brief Поле ключа Kling для UI: после save всегда пустое.
@@ -256,6 +279,18 @@ class CSecretStore : public QObject {
    QString file_path() const;
    QByteArray encode_blob() const;
    bool decode_blob(const QByteArray& blob);
+
+   /**
+    * @brief Если ключ Groq смотрит на OpenAI, ставит адрес Groq.
+    * @return true, если адрес сменили.
+    */
+   bool align_groq_key_host();
+
+   /**
+    * @brief Корень chat/TTS с учётом ключа Groq.
+    * @return базовый URL.
+    */
+   QString chat_root() const;
    QByteArray protect_blob(const QByteArray& plain) const;
    QByteArray unprotect_blob(const QByteArray& blob) const;
 

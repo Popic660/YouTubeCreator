@@ -873,4 +873,87 @@ TestCase {
       ctx.store.close()
       paths.remove_tree(ctx.dir)
    }
+
+   function test_dropAssetFromMediaPlacesClip() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const pane = requireChild(shell, "libraryPane")
+      const project = requireChild(shell, "projectDocument")
+      const host = requireChild(shell, "timelineHost")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const asset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      verify(asset.length > 0)
+      compare(project.clipCount, 0)
+      verify(host.drop_asset_on(asset, "video", "v1", 0).length === 0)
+      const id = store.create_short(folder, "Clip")
+      pane.select_entry(id, "short")
+      tryVerify(function() {
+         return project.shortId === id &&
+            requireChild(shell, "trackV1").visible
+      })
+      verify(findChild(shell, "timelineAssetDrop") !== null)
+      verify(findChild(shell, "mediaAssetRow") !== null)
+      const placed = host.drop_asset_on(asset, "video", "v1", 0)
+      verify(placed.length > 0)
+      compare(project.clip_track(placed), "v1")
+      compare(project.clip_asset_id(placed), asset)
+      compare(project.clipCount, 1)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_dropAudioAndImageUseDefaultTracks() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const pane = requireChild(shell, "libraryPane")
+      const project = requireChild(shell, "projectDocument")
+      const host = requireChild(shell, "timelineHost")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      pane.select_entry(id, "short")
+      tryVerify(function() { return project.shortId === id })
+      const wav = store.import_media("", paths.make_wav(dir))
+      const image = store.import_media("", paths.make_image(dir))
+      const audioClip = host.drop_asset_on(wav, "audio", "v1", 0)
+      verify(audioClip.length > 0)
+      compare(project.clip_track(audioClip), "a1")
+      const imageClip = host.drop_asset_on(image, "image", "a1", 0)
+      verify(imageClip.length > 0)
+      compare(project.clip_track(imageClip), "v2")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_dropOnJunctionInserts() {
+      const shell = createShell()
+      const dir = paths.make()
+      const store = requireChild(shell, "libraryStore")
+      const pane = requireChild(shell, "libraryPane")
+      const project = requireChild(shell, "projectDocument")
+      const host = requireChild(shell, "timelineHost")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      pane.select_entry(id, "short")
+      tryVerify(function() { return project.shortId === id })
+      const asset = store.import_media(
+         "", paths.fixture_path("vertical-short.mp4"))
+      const first = host.drop_asset_on(asset, "video", "v1", 0)
+      verify(first.length > 0)
+      const length = project.clip_out(first) - project.clip_in(first)
+      const second = host.drop_asset_on(asset, "video", "v1", length)
+      verify(second.length > 0)
+      compare(project.clipCount, 2)
+      const inserted = host.drop_asset_on(asset, "video", "v1", length)
+      verify(inserted.length > 0)
+      compare(project.clipCount, 3)
+      compare(project.clip_start(second), length * 2)
+      store.close()
+      paths.remove_tree(dir)
+   }
 }

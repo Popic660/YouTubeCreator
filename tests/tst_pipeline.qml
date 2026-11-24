@@ -192,6 +192,65 @@ TestCase {
       compare(again.apiKey, "")
    }
 
+   function test_openaiUrlDoesNotDoubleV1() {
+      const secrets = requireChild(createShell(), "secretStore")
+      secrets.baseUrl = "https://api.openai.com"
+      compare(secrets.openai_url("chat/completions"),
+         "https://api.openai.com/v1/chat/completions")
+      secrets.baseUrl = "https://api.groq.com/openai/v1"
+      compare(secrets.openai_url("chat/completions"),
+         "https://api.groq.com/openai/v1/chat/completions")
+      secrets.baseUrl = "https://api.groq.com/openai/v1/"
+      compare(secrets.openai_url("audio/speech"),
+         "https://api.groq.com/openai/v1/audio/speech")
+   }
+
+   function test_groqKeyLeavesOpenaiHost() {
+      const secrets = requireChild(createShell(), "secretStore")
+      resetSecrets(secrets)
+      secrets.baseUrl = "https://api.openai.com"
+      secrets.apiKey = "gsk_4EOLxxxxxxxxxxxxxxxxxwoPm"
+      compare(secrets.baseUrl, "https://api.groq.com/openai/v1")
+      compare(secrets.apiKeyHint, "gsk_4EOL…woPm")
+      verify(secrets.hasGroqKey)
+      compare(secrets.openai_url("chat/completions"),
+         "https://api.groq.com/openai/v1/chat/completions")
+      secrets.baseUrl = "https://api.openai.com"
+      compare(secrets.baseUrl, "https://api.openai.com")
+      compare(secrets.openai_url("chat/completions"),
+         "https://api.groq.com/openai/v1/chat/completions")
+      verify(secrets.save())
+      compare(secrets.baseUrl, "https://api.groq.com/openai/v1")
+   }
+
+   function test_chatWithGroqKeyPostsToGroq() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      verify(store.open(dir))
+      resetSecrets(secrets)
+      secrets.apiKey = "gsk_4EOLxxxxxxxxxxxxxxxxxwoPm"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_json(chatJson("Scene one"))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "City"))
+      pipeline.pauseAfterText = true
+      verify(pipeline.run(id))
+      tryVerify(function() {
+         return store.short_script(id).length > 0
+      })
+      verify(transport.lastUrl.indexOf("api.groq.com") >= 0)
+      verify(transport.lastUrl.indexOf("api.openai.com") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
    function test_chatPostRecordsTopicAndPrompt() {
       const dir = paths.make()
       const shell = createShell()
@@ -216,7 +275,8 @@ TestCase {
          return store.short_script(id).length > 0
       })
       verify(transport.lastUrl.indexOf("/v1/chat/completions") >= 0)
-      verify(transport.lastBody.indexOf("City night") >= 0)
+      verify(transport.lastUrl.indexOf("/v1/v1/") < 0)
+      verify(transport.lastBody.indexOf("City night") >= 0))
       verify(transport.lastBody.indexOf("Warm voice") >= 0)
       verify(transport.lastBody.indexOf("scenes") >= 0)
       pipeline.cancel()
@@ -308,9 +368,123 @@ TestCase {
       compare(project.first_clip_on("v1"), "")
       verify(transport.lastUrl.indexOf("/v1/audio/speech") >= 0)
       verify(transport.lastBody.indexOf("Narration text") >= 0)
+      verify(transport.lastBody.indexOf("\"response_format\":\"wav\"")
+         >= 0)
       const rel = store.asset_relpath(project.clip_asset_id(
          project.first_clip_on("a1")))
       verify(paths.file_exists(dir + "/" + rel))
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_speechJsonSendsSpokenLineNotRawJson() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      resetSecrets(secrets)
+      secrets.apiKey = "sk-test"
+      secrets.ttsModel = "canopylabs/orpheus-v1-english"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      const wav = paths.make_wav(dir)
+      transport.enqueue_file(wav)
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "Topic"))
+      verify(store.set_script(id,
+         "{\"scenes\":[{\"prompt\":\"city night\"," +
+         "\"line\":\"Night falls on the city.\"," +
+         "\"duration_s\":5}]}"))
+      verify(project.open_short(id))
+      verify(pipeline.retry(id))
+      waitStopped(pipeline)
+      compare(transport.chatCount, 0)
+      compare(transport.speechCount, 1)
+      verify(transport.lastBody.indexOf("Night falls on the city.")
+         >= 0)
+      verify(transport.lastBody.indexOf("city night") < 0)
+      verify(transport.lastBody.indexOf("\"scenes\"") < 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_speechRetriesRateLimitThenWritesClip() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      resetSecrets(secrets)
+      secrets.apiKey = "sk-test"
+      secrets.ttsModel = "canopylabs/orpheus-v1-english"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      const wav = paths.make_wav(dir)
+      transport.enqueue_status(429)
+      transport.enqueue_json(
+         "{\"error\":{\"message\":\"Rate limit reached for model " +
+         "'canopylabs/orpheus-v1-english' Please try again in 4.4s.\"}}")
+      transport.enqueue_file(wav)
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "Topic"))
+      verify(store.set_script(id, "Short line."))
+      verify(project.open_short(id))
+      verify(pipeline.retry(id))
+      waitStopped(pipeline)
+      compare(transport.chatCount, 0)
+      compare(transport.speechCount, 2)
+      verify(pipeline.lastError.indexOf("Rate limit") < 0)
+      verify(project.first_clip_on("a1").length > 0)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_speechOrpheusChunksLongNarration() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      verify(store.open(dir))
+      resetSecrets(secrets)
+      secrets.apiKey = "sk-test"
+      secrets.ttsModel = "canopylabs/orpheus-v1-english"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      const wav = paths.make_wav(dir)
+      transport.enqueue_file(wav)
+      transport.enqueue_file(wav)
+      transport.enqueue_file(wav)
+      let longText = ""
+      for (let i = 0; i < 60; ++i) {
+         longText += "word" + i + " "
+      }
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      verify(store.set_topic(id, "Topic"))
+      verify(store.set_script(id, longText))
+      verify(project.open_short(id))
+      verify(pipeline.retry(id))
+      waitStopped(pipeline)
+      compare(transport.chatCount, 0)
+      verify(transport.speechCount >= 2)
+      const body = JSON.parse(transport.lastBody)
+      verify(body.input.length <= 200)
+      verify(project.first_clip_on("a1").length > 0)
       store.close()
       paths.remove_tree(dir)
    }
@@ -469,6 +643,50 @@ TestCase {
          return error !== null && error.text.indexOf("boom") >= 0
       })
       requireChild(pane, "pipelineRetry")
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_retryButtonClickRerunsVoice() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const secrets = requireChild(shell, "secretStore")
+      const transport = requireChild(shell, "httpTransport")
+      const pipeline = requireChild(shell, "pipeline")
+      const project = requireChild(shell, "projectDocument")
+      const pane = requireChild(shell, "libraryPane")
+      const model = requireChild(shell, "libraryModel")
+      verify(store.open(dir))
+      resetSecrets(secrets)
+      secrets.apiKey = "sk-test"
+      verify(secrets.save())
+      transport.use_stub()
+      transport.clear()
+      transport.enqueue_json(chatJson("Kept script"))
+      transport.enqueue_error("tts down")
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+      model.toggle_id(folder)
+      tryVerify(function() { return model.count >= 2 })
+      verify(store.set_topic(id, "Topic"))
+      verify(project.open_short(id))
+      verify(pipeline.run(id))
+      waitStopped(pipeline)
+      compare(store.short_script(id), "Kept script")
+      compare(store.task_status(id), "error")
+      const retry = requireChild(pane, "pipelineRetry")
+      tryVerify(function() {
+         return retry.visible && retry.width > 0 && retry.height > 0
+      })
+      const speeches = transport.speechCount
+      const chats = transport.chatCount
+      transport.enqueue_error("tts again")
+      mouseClick(retry)
+      waitStopped(pipeline)
+      compare(transport.chatCount, chats)
+      compare(transport.speechCount, speeches + 1)
+      compare(pipeline.lastError, "tts again")
       store.close()
       paths.remove_tree(dir)
    }
@@ -712,9 +930,15 @@ TestCase {
          "{\"prompt\":\"B\",\"duration_s\":8}]}")
       compare(two.length, 2)
       compare(two[0].prompt, "A")
+      compare(two[0].line, "")
       compare(two[0].duration_s, 5)
       compare(two[1].prompt, "B")
       compare(two[1].duration_s, 8)
+      const voiced = scenes.parse(
+         "{\"scenes\":[{\"prompt\":\"A\",\"line\":\"Hi\"," +
+         "\"duration_s\":5}]}")
+      compare(voiced[0].prompt, "A")
+      compare(voiced[0].line, "Hi")
       const clamped = scenes.parse(
          "{\"scenes\":[{\"prompt\":\"A\",\"duration_s\":1}," +
          "{\"prompt\":\"B\",\"duration_s\":30}]}")

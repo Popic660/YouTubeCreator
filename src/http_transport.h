@@ -68,6 +68,12 @@ class CHttpTransport : public QObject {
    Q_INVOKABLE void use_stub();
 
    /**
+    * @brief Сообщает, что ответы из очереди, без сети.
+    * @return true, если заглушка.
+    */
+   bool is_stub() const { return stub_; }
+
+   /**
     * @brief Кладёт JSON-ответ в очередь заглушки.
     * @param json - тело ответа.
     */

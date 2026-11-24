@@ -498,7 +498,7 @@ TestCase {
 
       pane.open_menu(parentId)
       requireChild(shell, "menuPrompt").triggered()
-      compare(requireChild(shell, "promptField").background.radius, 4)
+      compare(requireChild(shell, "promptFieldFrame").radius, 4)
       requireChild(shell, "promptField").text = "Parent style"
       requireChild(shell, "promptAccept").clicked()
       compare(store.folder_prompt(parentId), "Parent style")
@@ -781,6 +781,60 @@ TestCase {
       })
    }
 
+   function test_panelDragStartsAfterMoveNotPress() {
+      DockState.reset_layout()
+      const shell = createShell()
+      const handle = requireChild(shell, "libraryChromeDrag")
+      tryVerify(function() {
+         return handle.width > 20 && handle.height > 10
+      })
+      compare(shell.panelDragging, false)
+      mousePress(handle, 12, 16)
+      compare(shell.panelDragging, false)
+      mouseMove(handle, -48, 16, 1, Qt.LeftButton)
+      tryVerify(function() { return shell.panelDragging === true })
+      mouseRelease(handle, -48, 16)
+      tryVerify(function() { return shell.panelDragging === false })
+      DockState.reset_layout()
+   }
+
+   function test_acceptPanelDropMovesLibrary() {
+      DockState.reset_layout()
+      const shell = createShell()
+      compare(DockState.libraryDock, "right")
+      const source = { panelId: "library" }
+      const drop = {
+         source: source,
+         acceptProposedAction: function() {}
+      }
+      shell.accept_panel_drop(drop, "left")
+      compare(DockState.libraryDock, "left")
+      const empty = { source: {}, acceptProposedAction: function() {} }
+      shell.accept_panel_drop(empty, "bottom")
+      compare(DockState.libraryDock, "left")
+      DockState.reset_layout()
+   }
+
+   function test_dragLibraryChromeToLeftDock() {
+      DockState.reset_layout()
+      const shell = createShell()
+      compare(DockState.libraryDock, "right")
+      const handle = requireChild(shell, "libraryChromeDrag")
+      const left = requireChild(shell, "dockLeft")
+      tryVerify(function() {
+         return handle.width > 20 && handle.height > 10 && left.width > 80
+      })
+      mousePress(handle, 12, 16)
+      mouseMove(handle, -80, 16, 1, Qt.LeftButton)
+      tryVerify(function() { return shell.panelDragging === true })
+      const dest = left.mapToItem(shell.contentItem,
+         left.width / 2, left.height / 2)
+      mouseMove(shell.contentItem, dest.x, dest.y, 1, Qt.LeftButton)
+      mouseRelease(shell.contentItem, dest.x, dest.y)
+      tryVerify(function() { return DockState.libraryDock === "left" })
+      DockState.reset_layout()
+   }
+
    function test_moveDocksAndRemember() {
       const shell = createShell()
       shell.place_panel("library", "left")
@@ -944,6 +998,7 @@ TestCase {
       pane.open_topic_dialog()
       const field = requireChild(shell, "topicField")
       tryVerify(function() { return field.visible })
+      compare(requireChild(shell, "topicFieldFrame").radius, 4)
       assertDialogCentered(shell, "topicDialog")
       pane.open_topic_dialog()
       field.text = "A topic"
@@ -954,6 +1009,70 @@ TestCase {
       const status = store.short_status(id)
       requireChild(shell, "topicGenerate").clicked()
       compare(store.short_status(id), status)
+      store.close()
+      paths.remove_tree(dir)
+   }
+
+   function test_promptAndTopicDialogsShowTitleCountAndScroll() {
+      const dir = paths.make()
+      const shell = createShell()
+      const store = requireChild(shell, "libraryStore")
+      const pane = requireChild(shell, "libraryPane")
+      verify(store.open(dir))
+      const folder = store.create_folder("", "Film")
+      const id = store.create_short(folder, "Clip")
+
+      pane.open_menu(folder)
+      pane.open_prompt_dialog()
+      const promptTitle = requireChild(shell, "promptDialogTitle")
+      compare(promptTitle.text, "Введите промт для папки")
+      const promptField = requireChild(shell, "promptField")
+      const promptFrame = requireChild(shell, "promptFieldFrame")
+      const promptCount = requireChild(shell, "promptCharCount")
+      const promptScroll = requireChild(shell, "promptScroll")
+      tryVerify(function() {
+         return promptFrame.height >= 160 &&
+            requireChild(shell, "promptDialog").width >= 480
+      })
+      compare(promptField.wrapMode, TextEdit.Wrap)
+      compare(promptCount.text, "0 символов")
+      promptField.text = "abc"
+      compare(promptCount.text, "3 символа")
+      let chunk = ""
+      for (let i = 0; i < 80; ++i) {
+         chunk += "строка текста для прокрутки\n"
+      }
+      promptField.text = chunk
+      tryVerify(function() {
+         return promptScroll.contentHeight > promptScroll.height + 20
+      })
+      promptField.text = "Line1\nLine2"
+      requireChild(shell, "promptAccept").clicked()
+      compare(store.folder_prompt(folder), "Line1\nLine2")
+
+      pane.open_short_menu(id)
+      pane.open_topic_dialog()
+      const topicTitle = requireChild(shell, "topicDialogTitle")
+      compare(topicTitle.text, "Введите тему и голос для видео")
+      const topicField = requireChild(shell, "topicField")
+      const topicFrame = requireChild(shell, "topicFieldFrame")
+      const topicCount = requireChild(shell, "topicCharCount")
+      const topicScroll = requireChild(shell, "topicScroll")
+      tryVerify(function() {
+         return topicFrame.height >= 160 &&
+            requireChild(shell, "topicDialog").width >= 480
+      })
+      compare(topicField.wrapMode, TextEdit.Wrap)
+      compare(requireChild(shell, "topicFieldFrame").radius, 4)
+      topicField.text = ""
+      compare(topicCount.text, "0 символов")
+      topicField.text = "abc"
+      compare(topicCount.text, "3 символа")
+      topicField.text = chunk
+      tryVerify(function() {
+         return topicScroll.contentHeight > topicScroll.height + 20
+      })
+      requireChild(shell, "topicDialog").close()
       store.close()
       paths.remove_tree(dir)
    }
